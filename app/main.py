@@ -5,7 +5,7 @@ from functools import lru_cache
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.config import Settings, get_settings
 from app.knowledge_base import load_knowledge_base
@@ -58,6 +58,11 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError) 
             "errors": [error["msg"] for error in exc.errors()],
         },
     )
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
