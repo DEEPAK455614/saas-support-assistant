@@ -96,3 +96,40 @@ def test_prompt_injection_cannot_bypass_retrieval(client):
     assert body["route"] in {"unsupported", "rag_only"}
     if body["route"] == "rag_only":
         assert body["evidence"]
+
+
+def test_root_demo_page(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "SaaS Support Assistant" in response.text
+    assert "Try POST /chat" in response.text
+
+
+def test_health(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_ready(client):
+    response = client.get("/ready")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["gemini_api_key_configured"] is True
+    assert body["gemini_model"] == "gemini-3.7-flash"
+
+
+def test_malformed_explicit_order_id(client):
+    response = client.post("/chat", json={"message": "Track ORD-12"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "validation_error"
+    assert "ORD-1234" in body["answer"]
+
+
+def test_general_cancellation_question_does_not_require_order_id(client):
+    response = client.post("/chat", json={"message": "Can I cancel my subscription?"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route"] == "rag_only"
+    assert body["tool"] is None
