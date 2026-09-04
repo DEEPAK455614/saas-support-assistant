@@ -1,0 +1,26 @@
+name: Package source ZIP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create submission ZIP
+        run: |
+          zip -r Deepak_Tiwari_Task1_SaaS_Support_Assistant_FINAL.zip . \
+            -x '.git/*' '.venv/*' 'venv/*' '__pycache__/*' '.pytest_cache/*' '.env'
+
+      - name: Upload source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Deepak_Tiwari_Task1_SaaS_Support_Assistant_FINAL
+          path: Deepak_Tiwari_Task1_SaaS_Support_Assistant_FINAL.zip
+          if-no-files-found: error
+          retention-days: 7
