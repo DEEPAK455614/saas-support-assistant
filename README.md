@@ -9,7 +9,8 @@ Request -> Validation -> Deterministic Router
                           /            \
                     Semantic RAG     Order Tool
                           \            /
-                           Grounded Gemini
+                     Grounded response
+                  (Gemini, safe fallback)
                                 |
                        Structured JSON response
 ```
@@ -21,12 +22,12 @@ See [`architecture.md`](architecture.md) for the detailed design.
 - Python 3.11+
 - FastAPI + Pydantic v2
 - Current `google-genai` Python SDK
-- Gemini text model: `gemini-3.7-flash` by default
+- Gemini text model: `gemini-3.5-flash-lite` by default
 - Gemini embedding model: `gemini-embedding-001`
 - In-memory cosine-similarity vector search
 - pytest + FastAPI TestClient
 
-Gemini is used because the assignment requests a real LLM, while deterministic application logic remains responsible for routing safety, order-ID validation, tool allow-listing, and relevance gating.
+Gemini is the actual LLM used for grounded natural-language generation. Deterministic application logic remains responsible for routing safety, order-ID validation, tool allow-listing, relevance gating, and fail-safe behavior.
 
 ## Knowledge base
 
@@ -38,9 +39,20 @@ The first RAG request embeds the FAQ entries and keeps their vectors in memory. 
 
 ### Relevance threshold
 
-The default threshold is `0.72`. Embedding scores are model- and corpus-dependent, so it is configurable and must be calibrated rather than treated as a universal constant. The intended calibration procedure is to run a small evaluation set containing clearly related FAQ queries and clearly unrelated queries, inspect their top similarities, then choose a threshold between the two observed ranges. The test suite independently proves that weak retrieval is rejected using a deterministic fake embedder. A threshold lowers risk but does not guarantee semantic correctness.
+The default threshold is `0.60`, selected from live Gemini embedding calibration against this exact FAQ corpus.
 
-For a real submission demo, record your observed Gemini score ranges after running `scripts/calibrate_threshold.py` or a small equivalent evaluation and adjust `.env` if necessary.
+Observed top cosine similarities during deployment calibration:
+
+| Query type | Example | Top score |
+|---|---|---:|
+| related | refund policy | 0.7276 |
+| related | password reset | 0.6991 |
+| related | cancellation | 0.7055 |
+| unrelated | FIFA World Cup | 0.5073 |
+| unrelated | Tokyo weather | 0.5037 |
+| unrelated | Roman emperor | 0.4880 |
+
+The minimum observed related score was `0.6991`; the maximum observed unrelated score was `0.5073`; their midpoint was `0.6032`. `0.60` was therefore selected as a practical configurable boundary for this small assessment corpus. This does not guarantee semantic correctness and should be recalibrated if the embedding model or knowledge base changes.
 
 ## Routing logic
 
@@ -51,7 +63,7 @@ The router uses deterministic signals:
 - all other support questions -> semantic retrieval, then threshold decision
 - weak retrieval -> unsupported
 
-An order tool call is never generated dynamically by Gemini. Only `get_order_status` exists in the tool registry/code path.
+An order tool call is never generated dynamically by Gemini. Only `get_order_status` exists in the allow-listed code path.
 
 ## Order tool
 
@@ -65,9 +77,13 @@ Mock records:
 
 Accepted normal format: `ORD-1234`.
 
+Tool-only answers are composed deterministically from the authoritative tool result and do not depend on Gemini availability.
+
 ## Grounding and prompt-injection defense
 
 Gemini receives a system instruction requiring it to use only the supplied KB and tool evidence. User messages are marked as untrusted input. Policy facts are never imported from model memory, user-supplied order claims are not considered verified, and weak retrieval never becomes model context.
+
+If Gemini generation has a transient timeout after valid evidence has already been retrieved, the API returns a deterministic grounded fallback from the retrieved FAQ/tool result instead of hallucinating or failing the whole request.
 
 ## Setup
 
@@ -97,12 +113,18 @@ Set `GEMINI_API_KEY` in `.env`.
 uvicorn app.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000/docs` for Swagger UI.
+Open `http://127.0.0.1:8000/` for the browser demo or `http://127.0.0.1:8000/docs` for Swagger UI.
 
 Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
+```
+
+Runtime readiness/configuration:
+
+```bash
+curl http://127.0.0.1:8000/ready
 ```
 
 ## API usage
@@ -135,7 +157,7 @@ See [`examples/sample_requests.md`](examples/sample_requests.md) for complete ex
 
 ## Tests
 
-Unit/API tests use fakes and do not require paid Gemini calls:
+Unit/API tests use fakes and do not require Gemini calls:
 
 ```bash
 pytest -v -m "not integration"
@@ -152,40 +174,53 @@ GEMINI_API_KEY=... RUN_GEMINI_INTEGRATION=1 pytest -v -m integration
 | Variable | Default | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | empty | Gemini API credential |
-| `GEMINI_MODEL` | `gemini-3.7-flash` | grounded response generation |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | grounded response generation |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | semantic retrieval |
+| `GEMINI_TIMEOUT_SECONDS` | `12` | Gemini request timeout |
 | `TOP_K` | `3` | number of retrieved documents |
-| `RELEVANCE_THRESHOLD` | `0.72` | minimum top similarity |
+| `RELEVANCE_THRESHOLD` | `0.60` | minimum top cosine similarity |
 | `MAX_MESSAGE_LENGTH` | `4000` | request message limit |
 | `LOG_LEVEL` | `INFO` | logging verbosity |
+| `STARTUP_SELF_TEST` | `false` | optional deployment calibration diagnostic |
 
 ## Render deployment
 
 This repository contains `render.yaml`. In Render:
 
-1. Create a new Blueprint or Web Service from this repository.
+1. Create a Blueprint or Web Service from this repository.
 2. Add `GEMINI_API_KEY` as a secret environment variable.
 3. Deploy.
 
-Manual settings if not using the Blueprint:
+Manual settings:
 
 - Runtime: Python
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 - Health check: `/health`
 
+## Error and degradation behavior
+
+- Missing/malformed order ID -> `validation_error`
+- Unknown order -> controlled `tool_only` response with `found: false`
+- Simulated order-service failure -> `tool_error`
+- Weak KB relevance -> `unsupported`
+- Embedding service failure -> `service_error`, or verified order data only for a combined request
+- Gemini generation timeout/error after successful retrieval -> deterministic grounded fallback from the already-verified evidence
+- Missing Gemini key -> order-tool requests still work; RAG requests return a controlled service error
+
+No stack traces or credentials are exposed in API responses.
+
 ## Assumptions
 
 - The local FAQ is authoritative for product/policy facts.
 - The mock order tool is authoritative for order-specific facts.
 - Unknown valid order IDs are not treated as tool crashes.
-- Expected conversational failures generally return HTTP 200 with an explicit route; malformed HTTP/request validation returns FastAPI 4xx responses.
-- Gemini is only a grounded response composer, not the source of policy truth or tool names.
+- Gemini is a grounded response composer, not the source of policy truth or tool names.
 
 ## Limitations
 
 - In-memory embeddings are recomputed after process restart.
-- The relevance threshold should be calibrated against the actual Gemini embedding model before production use.
+- The relevance threshold is corpus/model-specific.
 - Mock orders are not persistent.
 - No authentication/rate limiting is included because the assessment does not require them.
 - One API instance has no shared cache/state across replicas.
