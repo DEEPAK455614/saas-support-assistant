@@ -22,7 +22,7 @@ See [`architecture.md`](architecture.md) for the detailed design.
 - Python 3.11+
 - FastAPI + Pydantic v2
 - Current `google-genai` Python SDK
-- Gemini text model: `gemini-3.5-flash-lite` by default
+- Gemini text model: `gemini-3.1-flash-lite` by default
 - Gemini embedding model: `gemini-embedding-001`
 - In-memory cosine-similarity vector search
 - pytest + FastAPI TestClient
@@ -53,6 +53,8 @@ Observed top cosine similarities during deployment calibration:
 | unrelated | Roman emperor | 0.4880 |
 
 The minimum observed related score was `0.6991`; the maximum observed unrelated score was `0.5073`; their midpoint was `0.6032`. `0.60` was therefore selected as a practical configurable boundary for this small assessment corpus. This does not guarantee semantic correctness and should be recalibrated if the embedding model or knowledge base changes.
+
+The deployed service also completed a live grounded-generation self-test with `gemini-3.1-flash-lite` and received HTTP 200 from the Gemini API.
 
 ## Routing logic
 
@@ -174,7 +176,7 @@ GEMINI_API_KEY=... RUN_GEMINI_INTEGRATION=1 pytest -v -m integration
 | Variable | Default | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | empty | Gemini API credential |
-| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | grounded response generation |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | grounded response generation |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | semantic retrieval |
 | `GEMINI_TIMEOUT_SECONDS` | `12` | Gemini request timeout |
 | `TOP_K` | `3` | number of retrieved documents |
