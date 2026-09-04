@@ -28,7 +28,7 @@ class GeminiClient:
         api_key: str,
         model: str,
         embedding_model: str,
-        timeout_seconds: float = 20.0,
+        timeout_seconds: float = 12.0,
     ) -> None:
         if not api_key:
             raise ValueError("GEMINI_API_KEY is required")
@@ -61,8 +61,7 @@ class GeminiClient:
                 contents=build_grounded_prompt(user_message, kb_context, tool_result),
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
-                    max_output_tokens=700,
-                    thinking_config=types.ThinkingConfig(thinking_level="low"),
+                    max_output_tokens=320,
                 ),
             )
             text = (response.text or "").strip()
