@@ -47,25 +47,68 @@ jobs:
               assert ready_body["gemini_model"] == "gemini-3.1-flash-lite"
               assert ready_body["relevance_threshold"] == 0.60
 
-              tool = client.post(base + "/chat", json={"message": "Where is order ORD-1001?"})
-              assert tool.status_code == 200, tool.text
-              tool_body = tool.json()
-              assert tool_body["route"] == "tool_only"
-              assert tool_body["verified"] is True
-              assert tool_body["tool"]["result"]["status"] == "shipped"
-
+              # Required case 1: knowledge-base question.
               rag = client.post(base + "/chat", json={"message": "What is your refund policy?"})
               assert rag.status_code == 200, rag.text
               rag_body = rag.json()
               assert rag_body["route"] == "rag_only"
               assert rag_body["verified"] is True
               assert any(item["id"] == "refund-policy" for item in rag_body["evidence"])
+              assert rag_body["tool"] is None
 
+              # Required case 2: order-status question requiring the tool.
+              tool = client.post(base + "/chat", json={"message": "Where is order ORD-1001?"})
+              assert tool.status_code == 200, tool.text
+              tool_body = tool.json()
+              assert tool_body["route"] == "tool_only"
+              assert tool_body["verified"] is True
+              assert tool_body["tool"]["name"] == "get_order_status"
+              assert tool_body["tool"]["result"]["status"] == "shipped"
+              assert tool_body["evidence"] == []
+
+              # Required case 3: combined policy retrieval + order lookup.
+              combined = client.post(
+                  base + "/chat",
+                  json={"message": "Can I cancel order ORD-1001 and get a refund?"},
+              )
+              assert combined.status_code == 200, combined.text
+              combined_body = combined.json()
+              assert combined_body["route"] == "rag_and_tool"
+              assert combined_body["verified"] is True
+              assert combined_body["evidence"]
+              assert combined_body["tool"]["result"]["order_id"] == "ORD-1001"
+
+              # Required case 4: outside the knowledge base.
               unsupported = client.post(base + "/chat", json={"message": "Who won the FIFA World Cup?"})
               assert unsupported.status_code == 200, unsupported.text
               unsupported_body = unsupported.json()
               assert unsupported_body["route"] == "unsupported"
               assert unsupported_body["verified"] is False
+              assert unsupported_body["evidence"] == []
 
-          print("Live Render smoke tests passed")
+              # Required case 5: invalid/missing order ID.
+              missing = client.post(base + "/chat", json={"message": "Where is my order?"})
+              assert missing.status_code == 200, missing.text
+              missing_body = missing.json()
+              assert missing_body["route"] == "validation_error"
+              assert missing_body["verified"] is False
+
+              malformed = client.post(base + "/chat", json={"message": "Track ORD-12"})
+              assert malformed.status_code == 200, malformed.text
+              assert malformed.json()["route"] == "validation_error"
+
+              # Required case 6: simulated tool failure.
+              failure = client.post(base + "/chat", json={"message": "Where is ORD-FAIL?"})
+              assert failure.status_code == 200, failure.text
+              failure_body = failure.json()
+              assert failure_body["route"] == "tool_error"
+              assert failure_body["verified"] is False
+              assert failure_body["tool"]["error"] == "order_service_unavailable"
+
+              # Additional edge case required by the brief: empty input.
+              empty = client.post(base + "/chat", json={"message": "   "})
+              assert empty.status_code == 422, empty.text
+              assert empty.json()["route"] == "validation_error"
+
+          print("Live Render smoke tests passed for all required Task 1 cases")
           PY
