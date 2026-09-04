@@ -13,7 +13,9 @@ def test_tool_only_order_status(client):
     assert response.status_code == 200
     body = response.json()
     assert body["route"] == "tool_only"
+    assert body["verified"] is True
     assert body["tool"]["result"]["status"] == "shipped"
+    assert "DHL123456" in body["answer"]
     assert body["evidence"] == []
 
 
@@ -116,7 +118,7 @@ def test_ready(client):
     assert response.status_code == 200
     body = response.json()
     assert body["gemini_api_key_configured"] is True
-    assert body["gemini_model"] == "gemini-3.7-flash"
+    assert body["gemini_model"] == "gemini-3.5-flash-lite"
 
 
 def test_malformed_explicit_order_id(client):
