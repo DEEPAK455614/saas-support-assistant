@@ -1,0 +1,52 @@
+[
+  {
+    "id": "subscription-plans",
+    "title": "Subscription Plans",
+    "content": "AcmeCloud offers Starter, Pro, and Business plans. Starter is intended for individual users, Pro adds team collaboration features, and Business adds organization administration and priority support. Current prices are shown in the billing portal and are not duplicated in this FAQ."
+  },
+  {
+    "id": "cancellation-policy",
+    "title": "Cancellation Policy",
+    "content": "A subscription can be cancelled at any time from Settings > Billing. Cancellation stops the next renewal; paid access remains active until the end of the current billing period. Cancellation does not automatically create a refund."
+  },
+  {
+    "id": "refund-policy",
+    "title": "Refund Policy",
+    "content": "First-time subscription purchases may be refunded when the request is submitted within 7 calendar days of the initial charge. Renewal charges and usage-based charges are non-refundable. Approved refunds are returned to the original payment method."
+  },
+  {
+    "id": "billing-cycle",
+    "title": "Billing Cycle",
+    "content": "Monthly subscriptions renew on the same calendar day each month when possible. Annual subscriptions renew on the anniversary of the original subscription date. Invoices are available in Settings > Billing > Invoices."
+  },
+  {
+    "id": "password-reset",
+    "title": "Password Reset",
+    "content": "Users can reset a password from the sign-in page by selecting Forgot password and following the email link. Password reset links expire after 30 minutes. If single sign-on is enforced by an organization, password management is handled by that identity provider."
+  },
+  {
+    "id": "account-deletion",
+    "title": "Account Deletion",
+    "content": "Account owners can request deletion from Settings > Account > Delete account. The deletion request enters a 14-day recovery window. After that window, the account is scheduled for permanent deletion subject to legally required retention."
+  },
+  {
+    "id": "trial-period",
+    "title": "Trial Period",
+    "content": "New eligible workspaces receive a 14-day Pro trial. A payment method is not required to start the trial. At the end of the trial, the workspace returns to Starter unless a paid plan is selected."
+  },
+  {
+    "id": "data-retention",
+    "title": "Data Retention",
+    "content": "Deleted workspace content remains in recoverable backups for up to 30 days before routine backup expiration. Some billing, fraud-prevention, and legal records may be retained longer when required by law."
+  },
+  {
+    "id": "support-availability",
+    "title": "Support Availability",
+    "content": "Email support is available Monday through Friday, 09:00-18:00 UTC, excluding company holidays. Business-plan customers also receive priority ticket handling. The status page should be used for active incident updates."
+  },
+  {
+    "id": "plan-changes",
+    "title": "Upgrade and Downgrade Behavior",
+    "content": "Plan upgrades take effect immediately and any applicable prorated charge is calculated by the billing system. Downgrades take effect at the next renewal date, so current paid features remain available until the end of the billing period."
+  }
+]
