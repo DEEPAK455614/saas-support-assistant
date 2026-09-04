@@ -21,3 +21,51 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run unit and API tests
         run: pytest -q -m "not integration"
+      - name: Smoke test live Render deployment
+        if: github.ref == 'refs/heads/main'
+        env:
+          BASE_URL: https://saas-support-assistant.onrender.com
+        run: |
+          python - <<'PY'
+          import os
+          import httpx
+
+          base = os.environ["BASE_URL"]
+          with httpx.Client(timeout=90.0, follow_redirects=True) as client:
+              root = client.get(base + "/")
+              assert root.status_code == 200, root.text
+              assert "SaaS Support Assistant" in root.text
+
+              health = client.get(base + "/health")
+              assert health.status_code == 200, health.text
+              assert health.json()["status"] == "ok"
+
+              ready = client.get(base + "/ready")
+              assert ready.status_code == 200, ready.text
+              ready_body = ready.json()
+              assert ready_body["gemini_api_key_configured"] is True
+              assert ready_body["gemini_model"] == "gemini-3.1-flash-lite"
+              assert ready_body["relevance_threshold"] == 0.60
+
+              tool = client.post(base + "/chat", json={"message": "Where is order ORD-1001?"})
+              assert tool.status_code == 200, tool.text
+              tool_body = tool.json()
+              assert tool_body["route"] == "tool_only"
+              assert tool_body["verified"] is True
+              assert tool_body["tool"]["result"]["status"] == "shipped"
+
+              rag = client.post(base + "/chat", json={"message": "What is your refund policy?"})
+              assert rag.status_code == 200, rag.text
+              rag_body = rag.json()
+              assert rag_body["route"] == "rag_only"
+              assert rag_body["verified"] is True
+              assert any(item["id"] == "refund-policy" for item in rag_body["evidence"])
+
+              unsupported = client.post(base + "/chat", json={"message": "Who won the FIFA World Cup?"})
+              assert unsupported.status_code == 200, unsupported.text
+              unsupported_body = unsupported.json()
+              assert unsupported_body["route"] == "unsupported"
+              assert unsupported_body["verified"] is False
+
+          print("Live Render smoke tests passed")
+          PY
