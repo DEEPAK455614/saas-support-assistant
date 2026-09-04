@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -27,28 +28,36 @@ class ServiceConfigurationError(RuntimeError):
 
 
 class Services:
+    """Application services.
+
+    The deterministic order tool and local knowledge-base file remain usable even if
+    Gemini is temporarily unavailable. Gemini is required only for semantic retrieval
+    and preferred natural-language composition.
+    """
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        if not settings.gemini_api_key:
-            raise ServiceConfigurationError("GEMINI_API_KEY is not configured")
-
-        self.gemini = GeminiClient(
-            api_key=settings.gemini_api_key,
-            model=settings.gemini_model,
-            embedding_model=settings.gemini_embedding_model,
-            timeout_seconds=settings.gemini_timeout_seconds,
-        )
         try:
-            documents = load_knowledge_base(settings.kb_path)
+            self.documents = load_knowledge_base(settings.kb_path)
         except KnowledgeBaseError as exc:
             raise ServiceConfigurationError("Knowledge base could not be loaded") from exc
 
-        self.retriever = InMemoryRetriever(
-            documents=documents,
-            embedder=self.gemini,
-            top_k=settings.top_k,
-            threshold=settings.relevance_threshold,
-        )
+        self.gemini: GeminiClient | None = None
+        self.retriever: InMemoryRetriever | None = None
+
+        if settings.gemini_api_key:
+            self.gemini = GeminiClient(
+                api_key=settings.gemini_api_key,
+                model=settings.gemini_model,
+                embedding_model=settings.gemini_embedding_model,
+                timeout_seconds=settings.gemini_timeout_seconds,
+            )
+            self.retriever = InMemoryRetriever(
+                documents=self.documents,
+                embedder=self.gemini,
+                top_k=settings.top_k,
+                threshold=settings.relevance_threshold,
+            )
 
 
 @lru_cache
@@ -57,9 +66,13 @@ def get_services() -> Services:
 
 
 async def _run_startup_self_test() -> None:
-    """One-shot deployment diagnostic. Enabled only with STARTUP_SELF_TEST=true."""
+    """Run non-blocking deployment diagnostics when explicitly enabled."""
     try:
         services = get_services()
+        if services.retriever is None or services.gemini is None:
+            logger.warning("startup_self_test skipped: Gemini is not configured")
+            return
+
         cases = [
             ("related_refund", "What is your refund policy?"),
             ("related_password", "How do I reset my password?"),
@@ -81,7 +94,9 @@ async def _run_startup_self_test() -> None:
             else:
                 unrelated_scores.append(score)
             if tag == "related_refund" and top:
-                refund_context = f"ID: {top.document.id}\nTITLE: {top.document.title}\nCONTENT: {top.document.content}"
+                refund_context = (
+                    f"ID: {top.document.id}\nTITLE: {top.document.title}\nCONTENT: {top.document.content}"
+                )
             logger.info(
                 "startup_self_test retrieval tag=%s top_id=%s score=%.4f",
                 tag,
@@ -101,12 +116,15 @@ async def _run_startup_self_test() -> None:
                 services.retriever.threshold,
             )
 
-        await services.gemini.generate_grounded_answer(
-            "What is your refund policy?",
-            refund_context,
-            "",
-        )
-        logger.info("startup_self_test generation status=ok model=%s", services.settings.gemini_model)
+        try:
+            await services.gemini.generate_grounded_answer(
+                "What is your refund policy?",
+                refund_context,
+                "",
+            )
+            logger.info("startup_self_test generation status=ok model=%s", services.settings.gemini_model)
+        except LLMError:
+            logger.exception("startup_self_test generation status=failed model=%s", services.settings.gemini_model)
     except Exception as exc:
         logger.exception("startup_self_test status=failed error_type=%s", type(exc).__name__)
 
@@ -115,13 +133,13 @@ async def _run_startup_self_test() -> None:
 async def lifespan(_: FastAPI):
     settings = get_settings()
     if settings.startup_self_test:
-        await _run_startup_self_test()
+        asyncio.create_task(_run_startup_self_test())
     yield
 
 
 app = FastAPI(
     title="SaaS Support Assistant",
-    version="1.1.0",
+    version="1.2.0",
     description="Grounded SaaS support API using Gemini, local RAG, and a deterministic order-status tool.",
     lifespan=lifespan,
 )
@@ -148,7 +166,7 @@ async def service_configuration_handler(_: Request, exc: ServiceConfigurationErr
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
-            "answer": "The AI support service is not configured correctly. Please contact the service administrator.",
+            "answer": "The support service is not configured correctly. Please contact the service administrator.",
             "route": "service_error",
             "evidence": [],
             "tool": None,
@@ -164,6 +182,11 @@ async def root(request: Request) -> Response:
     return HTMLResponse(DEMO_HTML)
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "saas-support-assistant"}
@@ -173,12 +196,18 @@ async def health() -> dict[str, str]:
 async def ready(settings: Settings = Depends(get_settings)) -> JSONResponse:
     configured = bool(settings.gemini_api_key)
     return JSONResponse(
-        status_code=status.HTTP_200_OK if configured else status.HTTP_503_SERVICE_UNAVAILABLE,
+        status_code=status.HTTP_200_OK,
         content={
-            "status": "configured" if configured else "not_configured",
+            "status": "ready" if configured else "degraded",
             "gemini_api_key_configured": configured,
             "gemini_model": settings.gemini_model,
             "embedding_model": settings.gemini_embedding_model,
+            "relevance_threshold": settings.relevance_threshold,
+            "note": (
+                "Gemini retrieval and generation are enabled."
+                if configured
+                else "Order-tool requests still work, but RAG requires GEMINI_API_KEY."
+            ),
         },
     )
 
@@ -216,6 +245,32 @@ def _malformed_order_candidate(message: str) -> str | None:
     except InvalidOrderId:
         return candidate
     return None
+
+
+def _tool_answer(tool_result: dict) -> str:
+    order_id = str(tool_result.get("order_id", "the order"))
+    status_value = str(tool_result.get("status", "unknown"))
+    parts = [f"Order {order_id} is {status_value}."]
+    if tool_result.get("carrier"):
+        parts.append(f"Carrier: {tool_result['carrier']}.")
+    if tool_result.get("tracking_number"):
+        parts.append(f"Tracking number: {tool_result['tracking_number']}.")
+    if tool_result.get("estimated_delivery"):
+        parts.append(f"Estimated delivery: {tool_result['estimated_delivery']}.")
+    if tool_result.get("delivered_on"):
+        parts.append(f"Delivered on: {tool_result['delivered_on']}.")
+    return " ".join(parts)
+
+
+def _grounded_fallback(results: list[RetrievalResult], tool_result: dict | None = None) -> str:
+    """Compose a safe answer without model memory when Gemini generation fails."""
+    parts: list[str] = []
+    if tool_result:
+        parts.append(_tool_answer(tool_result))
+    if results:
+        top = results[0].document
+        parts.append(f"According to {top.title}: {top.content}")
+    return " ".join(parts) or "I cannot verify that information from the available evidence."
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -260,31 +315,6 @@ async def chat(payload: ChatRequest, services: Services = Depends(get_services))
                 verified=False,
             )
 
-    retrieval_results: list[RetrievalResult] = []
-    if decision.use_rag:
-        try:
-            candidates = await services.retriever.retrieve(payload.message)
-        except EmbeddingError:
-            logger.exception("retrieval_failed")
-            return ChatResponse(
-                answer="Knowledge-base retrieval is temporarily unavailable, so I cannot verify that information.",
-                route="service_error",
-                verified=False,
-            )
-
-        top_score = candidates[0].score if candidates else None
-        logger.info("retrieval top_score=%s threshold=%s", top_score, services.retriever.threshold)
-        if services.retriever.is_relevant(candidates):
-            retrieval_results = [item for item in candidates if item.score >= services.retriever.threshold]
-        elif not decision.use_order_tool:
-            return ChatResponse(
-                answer="I cannot verify that information from the available support knowledge base.",
-                route="unsupported",
-                verified=False,
-            )
-
-    weak_combined_context = decision.use_rag and decision.use_order_tool and not retrieval_results
-
     tool_meta: ToolMetadata | None = None
     tool_result: dict | None = None
     if decision.use_order_tool and order_id:
@@ -314,35 +344,92 @@ async def chat(payload: ChatRequest, services: Services = Depends(get_services))
     if tool_result is not None and tool_result.get("found") is False:
         return ChatResponse(
             answer=f"I could not find an order matching {tool_result['order_id']}.",
-            route="rag_and_tool" if retrieval_results else "tool_only",
-            evidence=_evidence(retrieval_results),
+            route="tool_only",
             tool=tool_meta,
             verified=False,
         )
 
-    route = "rag_and_tool" if retrieval_results and tool_result else "rag_only" if retrieval_results else "tool_only"
+    # Tool-only answers do not depend on Gemini. The tool output is already authoritative.
+    if decision.use_order_tool and not decision.use_rag and tool_result is not None:
+        return ChatResponse(
+            answer=_tool_answer(tool_result),
+            route="tool_only",
+            tool=tool_meta,
+            verified=True,
+        )
 
+    retrieval_results: list[RetrievalResult] = []
+    if decision.use_rag:
+        if services.retriever is None:
+            return ChatResponse(
+                answer="Knowledge-base retrieval is unavailable because Gemini is not configured.",
+                route="service_error",
+                tool=tool_meta,
+                verified=False,
+            )
+        try:
+            candidates = await services.retriever.retrieve(payload.message)
+        except EmbeddingError:
+            logger.exception("retrieval_failed")
+            if tool_result is not None:
+                return ChatResponse(
+                    answer=(
+                        _tool_answer(tool_result)
+                        + " I could verify the order, but policy retrieval is temporarily unavailable."
+                    ),
+                    route="tool_only",
+                    tool=tool_meta,
+                    verified=False,
+                )
+            return ChatResponse(
+                answer="Knowledge-base retrieval is temporarily unavailable, so I cannot verify that information.",
+                route="service_error",
+                verified=False,
+            )
+
+        top_score = candidates[0].score if candidates else None
+        logger.info("retrieval top_score=%s threshold=%s", top_score, services.retriever.threshold)
+        if services.retriever.is_relevant(candidates):
+            retrieval_results = [item for item in candidates if item.score >= services.retriever.threshold]
+        elif not decision.use_order_tool:
+            return ChatResponse(
+                answer="I cannot verify that information from the available support knowledge base.",
+                route="unsupported",
+                verified=False,
+            )
+
+    if decision.use_rag and decision.use_order_tool and not retrieval_results:
+        return ChatResponse(
+            answer=(
+                _tool_answer(tool_result or {})
+                + " I could verify the order information, but I could not verify the requested policy information from the knowledge base."
+            ),
+            route="tool_only",
+            tool=tool_meta,
+            verified=False,
+        )
+
+    route = "rag_and_tool" if retrieval_results and tool_result else "rag_only"
     kb_context = _kb_context(retrieval_results)
     serialized_tool = json.dumps(tool_result, separators=(",", ":"), sort_keys=True) if tool_result else ""
-    try:
-        answer = await services.gemini.generate_grounded_answer(payload.message, kb_context, serialized_tool)
-    except LLMError:
-        logger.exception("generation_failed")
-        return ChatResponse(
-            answer="Verified evidence was found, but the language model is temporarily unavailable, so I cannot safely compose the final answer.",
-            route="service_error",
-            evidence=_evidence(retrieval_results),
-            tool=tool_meta,
-            verified=False,
-        )
 
-    if weak_combined_context:
-        answer += " I could verify the order information, but I could not verify the requested policy information from the knowledge base."
+    if services.gemini is not None:
+        try:
+            answer = await services.gemini.generate_grounded_answer(
+                payload.message,
+                kb_context,
+                serialized_tool,
+            )
+        except LLMError:
+            logger.exception("generation_failed_using_grounded_fallback")
+            answer = _grounded_fallback(retrieval_results, tool_result)
+    else:
+        answer = _grounded_fallback(retrieval_results, tool_result)
 
     return ChatResponse(
         answer=answer,
-        route=route if not weak_combined_context else "tool_only",
+        route=route,
         evidence=_evidence(retrieval_results),
         tool=tool_meta,
-        verified=not weak_combined_context,
+        verified=True,
     )
