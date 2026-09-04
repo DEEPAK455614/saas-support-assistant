@@ -11,13 +11,13 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-3.7-flash
+        value: gemini-3.5-flash-lite
       - key: GEMINI_EMBEDDING_MODEL
         value: gemini-embedding-001
       - key: GEMINI_TIMEOUT_SECONDS
-        value: "20"
+        value: "12"
       - key: RELEVANCE_THRESHOLD
-        value: "0.72"
+        value: "0.60"
       - key: TOP_K
         value: "3"
       - key: STARTUP_SELF_TEST
