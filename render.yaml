@@ -1,8 +1,11 @@
 services:
   - type: web
     name: saas-support-assistant
-    runtime: docker
+    runtime: python
     plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: GEMINI_API_KEY
@@ -11,7 +14,11 @@ services:
         value: gemini-3.7-flash
       - key: GEMINI_EMBEDDING_MODEL
         value: gemini-embedding-001
+      - key: GEMINI_TIMEOUT_SECONDS
+        value: "20"
       - key: RELEVANCE_THRESHOLD
         value: "0.72"
       - key: TOP_K
         value: "3"
+      - key: STARTUP_SELF_TEST
+        value: "false"
