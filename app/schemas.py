@@ -10,6 +10,7 @@ RouteName = Literal[
     "unsupported",
     "validation_error",
     "tool_error",
+    "service_error",
 ]
 
 
