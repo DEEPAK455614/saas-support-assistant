@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: saas-support-assistant
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.7-flash
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: RELEVANCE_THRESHOLD
+        value: "0.72"
+      - key: TOP_K
+        value: "3"
