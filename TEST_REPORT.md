@@ -36,21 +36,25 @@ Validated behaviors include:
 
 ## Live Render smoke test
 
-The CI workflow also tested the public deployment at `https://saas-support-assistant.onrender.com` using real HTTP requests.
+The CI workflow tests the public deployment at `https://saas-support-assistant.onrender.com` using real HTTP requests.
 
 Verified live checks:
 
 - `GET /` -> HTTP 200 and demo page present
 - `GET /health` -> HTTP 200 with `status: ok`
 - `GET /ready` -> HTTP 200 with Gemini configured, `gemini-3.1-flash-lite`, and relevance threshold `0.60`
-- `POST /chat` order lookup for `ORD-1001` -> `tool_only`, verified, status `shipped`
-- `POST /chat` refund-policy query -> `rag_only`, verified, `refund-policy` evidence returned
-- `POST /chat` FIFA question -> `unsupported`, not verified
+- Required case 1: refund-policy query -> `rag_only`, verified, `refund-policy` evidence returned
+- Required case 2: `ORD-1001` lookup -> `tool_only`, verified, status `shipped`
+- Required case 3: combined cancellation/refund + `ORD-1001` -> `rag_and_tool`, verified, with both KB evidence and tool result
+- Required case 4: FIFA question -> `unsupported`, not verified
+- Required case 5: missing order ID -> `validation_error`; malformed `ORD-12` -> `validation_error`
+- Required case 6: `ORD-FAIL` -> `tool_error`, not verified, controlled `order_service_unavailable` metadata
+- Additional edge case: whitespace-only message -> HTTP 422 with `validation_error`
 
 Latest result:
 
 ```text
-Live Render smoke tests passed
+Live Render smoke tests passed for all required Task 1 cases
 ```
 
-This validates both the current repository code and the deployed Task 1 API path.
+This validates both the repository implementation and the deployed Task 1 API path.
