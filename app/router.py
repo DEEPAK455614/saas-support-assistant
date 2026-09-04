@@ -4,15 +4,20 @@ from app.schemas import RouteDecision
 
 
 ORDER_ID_IN_TEXT = re.compile(r"\bORD-(?:\d{4}|FAIL)\b", re.IGNORECASE)
-ORDER_INTENT_TERMS = (
-    "order",
-    "shipment",
-    "shipping status",
-    "delivery",
-    "tracking",
-    "track my",
-    "where is my",
-    "where's my",
+ORDER_ID_CANDIDATE = re.compile(r"\bORD-[A-Za-z0-9_/-]+\b", re.IGNORECASE)
+ORDER_STATUS_TERMS = (
+    "where is my order",
+    "where's my order",
+    "where is order",
+    "where's order",
+    "order status",
+    "shipment status",
+    "delivery status",
+    "track my order",
+    "track my shipment",
+    "tracking number",
+    "track order",
+    "track shipment",
 )
 POLICY_HINT_TERMS = (
     "refund",
@@ -41,7 +46,7 @@ def extract_order_id(message: str) -> str | None:
 
 def looks_like_order_request(message: str) -> bool:
     lowered = message.lower()
-    return bool(ORDER_ID_IN_TEXT.search(message)) or any(term in lowered for term in ORDER_INTENT_TERMS)
+    return bool(ORDER_ID_CANDIDATE.search(message)) or any(term in lowered for term in ORDER_STATUS_TERMS)
 
 
 def looks_like_policy_request(message: str) -> bool:
@@ -57,5 +62,5 @@ def decide_route(message: str) -> RouteDecision:
     if order_needed and policy_hint:
         return RouteDecision(use_rag=True, use_order_tool=True, reason="order_and_policy_signals")
     if order_needed:
-        return RouteDecision(use_rag=False, use_order_tool=True, reason="order_signal")
+        return RouteDecision(use_rag=False, use_order_tool=True, reason="order_status_signal")
     return RouteDecision(use_rag=True, use_order_tool=False, reason="kb_relevance_check")
