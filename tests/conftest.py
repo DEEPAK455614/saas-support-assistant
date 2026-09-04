@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.knowledge_base import load_knowledge_base
-from app.main import Services, app, get_services
+from app.main import app, get_services
 from app.retrieval import InMemoryRetriever
 
 
@@ -70,6 +70,7 @@ class FakeServices:
 def client():
     fake = FakeServices()
     app.dependency_overrides[get_services] = lambda: fake
+    app.dependency_overrides[get_settings] = lambda: fake.settings
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
