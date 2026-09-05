@@ -1,0 +1,15 @@
+name: Ekatma Gemini diagnostic
+on:
+  push:
+    branches: [ekatma-intelligence-os]
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exercise non-canonical Gemini path
+        run: |
+          set -e
+          URL="https://ekatma-intelligence-os.onrender.com"
+          curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"In Advaita Vedanta, explain the difference between pratibhasika and vyavaharika satta with a simple example.","history":[]}' | jq .
