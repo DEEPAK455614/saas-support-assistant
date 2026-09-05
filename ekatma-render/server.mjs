@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { matchCanonical, canonicalAnswerObject, probableQuestionGroups, canonicalStats } from './canonical-layer.mjs';
+import './canonical-sync.mjs';
 
 const PUBLIC_PORT=Number(process.env.PORT||10000);
 const INTERNAL_PORT=PUBLIC_PORT+1;
@@ -34,4 +35,4 @@ async function handleChat(req,res,body){let payload={};try{payload=JSON.parse(bo
 async function healthWithCanonical(req,res){try{const r=await internalFetch('/health');const j=await r.json();return sendJson(res,r.status,{...j,version:'4.1.0',canonicalKnowledge:canonicalStats(),answerPolicy:'canonical-first > approved RAG > safe extractive > refusal'});}catch{return sendJson(res,200,{ok:true,service:'Ekatma Intelligence OS',version:'4.1.0',canonicalKnowledge:canonicalStats()})}}
 
 const gateway=http.createServer(async(req,res)=>{try{const u=new URL(req.url,`http://${req.headers.host||'localhost'}`);if(req.method==='GET'&&(u.pathname==='/health'||u.pathname==='/ready'))return healthWithCanonical(req,res);if(req.method==='GET'&&u.pathname==='/api/probable-questions')return sendJson(res,200,{groups:probableQuestionGroups(),stats:canonicalStats(),source:'canonical-pack-v1'});if(req.method==='GET'&&u.pathname==='/api/canonical-stats')return sendJson(res,200,canonicalStats());if(req.method==='POST'&&(u.pathname==='/api/chat'||u.pathname==='/api'))return handleChat(req,res,await readBody(req));return forward(req,res)}catch(e){console.error('gateway_error',e?.message||e);return sendJson(res,500,{error:'gateway_error'})}});
-setTimeout(()=>gateway.listen(PUBLIC_PORT,'0.0.0.0',()=>console.log(`Ekatma Intelligence OS 4.1 gateway on ${PUBLIC_PORT} | canonical ${canonicalStats().facts} facts / ${canonicalStats().questionForms} question forms`)),40);
+setTimeout(()=>gateway.listen(PUBLIC_PORT,'0.0.0.0',()=>console.log(`Ekatma Intelligence OS 4.1 gateway on ${PUBLIC_PORT} | canonical ${canonicalStats().facts} facts / ${canonicalStats().questionForms} question forms / ${canonicalStats().reverseQuestionForms} reverse tests`)),40);
