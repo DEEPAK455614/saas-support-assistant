@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createDecipheriv } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 
 globalThis.Netlify={env:{get:(key)=>process.env[key]}};
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
@@ -14,8 +15,8 @@ const {default:apiHandler}=await import(pathToFileURL(apiPath).href);
 const INDEX=fs.readFileSync(indexPath,'utf8');
 
 const REFUSAL='इस प्रश्न के लिए उपलब्ध Ekatma knowledge base में विश्वसनीय संदर्भ नहीं मिला। संबंधित meeting, document या verified source जोड़ने पर मैं उसे evidence के साथ analyse कर सकता हूँ।';
-const WELCOME=`॥ सर्वं खल्विदं ब्रह्म ॥\n\nनमस्ते। Ekatma Intelligence OS में आपका स्वागत है — एक ऐसी ज्ञान-परत जहाँ बैठकों, दस्तावेज़ों, यात्राओं, निर्णयों और एकात्म-दृष्टि को एक साथ समझा जा सकता है।\n\nआप Ekatma Dham, Ekatma Yatra, Acharya Shankar Sanskritik Ekta Nyas, meetings, decisions, routes, people, documents या pending actions के बारे में पूछ सकते हैं।`;
-const BUILDER=`Ekatma Intelligence OS को **Deepak Tiwari** ने develop और build किया है। वे इस system के developer और builder हैं।`;
+const WELCOME=`॥ सर्वं खल्विदं ब्रह्म ॥\n\nहरिः ॐ 🙏\nEkatma Intelligence OS में आपका स्वागत है।\n\nयहाँ meetings, documents, people, routes, decisions और field intelligence अलग-अलग टुकड़े नहीं हैं — वे एक ही व्यापक दृष्टि के रूप में जुड़े हैं।\n\n**Oneness: अनेक स्रोत, एक स्पष्ट समझ।**\nपूछिए — आज आप किस विषय को स्पष्ट देखना चाहते हैं?`;
+const BUILDER=`Ekatma Intelligence OS को **Deepak Tiwari** ने design, develop और build किया है। वे इस intelligence system के developer और builder हैं।`;
 
 function norm(s=''){return String(s).normalize('NFKC').toLowerCase().replace(/[’']/g,'').replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();}
 function isGreeting(q){
@@ -30,17 +31,18 @@ function jsonRes(data,status=200){return new Response(JSON.stringify(data),{stat
 
 function loadOverlay(){
   try{
-    const dir=path.join(ROOT,'overlay2');
+    const dir=path.join(ROOT,'overlay3');
     if(!fs.existsSync(dir)) return [];
     const keyHex=process.env.OVERLAY_KEY;
     if(!keyHex||!/^[0-9a-f]{64}$/i.test(keyHex)) return [];
     const b64=fs.readdirSync(dir).filter(f=>/^part\d+$/.test(f)).sort().map(f=>fs.readFileSync(path.join(dir,f),'utf8')).join('');
     const blob=Buffer.from(b64,'base64');
-    if(blob.subarray(0,4).toString()!=='EK2O') return [];
+    if(blob.subarray(0,4).toString()!=='EK3O') return [];
     const nonce=blob.subarray(4,16), enc=blob.subarray(16), tag=enc.subarray(enc.length-16), ct=enc.subarray(0,-16);
     const d=createDecipheriv('aes-256-gcm',Buffer.from(keyHex,'hex'),nonce);
-    d.setAAD(Buffer.from('EKATMA-OVERLAY2-V1')); d.setAuthTag(tag);
-    return JSON.parse(Buffer.concat([d.update(ct),d.final()]).toString('utf8'));
+    d.setAAD(Buffer.from('EKATMA-OVERLAY3-V1')); d.setAuthTag(tag);
+    const gz=Buffer.concat([d.update(ct),d.final()]);
+    return JSON.parse(gunzipSync(gz).toString('utf8'));
   }catch(e){console.error('overlay_load_error',e?.message||e);return [];}
 }
 const overlay=loadOverlay();
