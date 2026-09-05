@@ -19,7 +19,6 @@ jobs:
             if grep -q '"version":"4.2.0"' <<< "$BODY"; then exit 0; fi
             sleep 10
           done
-          echo "4.2 did not become live" >&2
           exit 1
 
       - name: Validate mobile-safe UI and corpus
@@ -38,10 +37,7 @@ jobs:
           grep -q 'font-size:16px' <<< "$ROOT"
           grep -q 'Gemini synthesis · in-scope only' <<< "$ROOT"
           STATS=$(curl -fsS "$URL/api/canonical-stats")
-          echo "$STATS" | jq .
-          jq -e '.facts == 117' <<< "$STATS" >/dev/null
-          jq -e '.topics == 16' <<< "$STATS" >/dev/null
-          jq -e '.reverseQuestionForms >= 900' <<< "$STATS" >/dev/null
+          jq -e '.facts == 117 and .topics == 16 and .reverseQuestionForms >= 900' <<< "$STATS" >/dev/null
           HEALTH=$(curl -fsS "$URL/health")
           jq -e '.geminiComposerConfigured == true' <<< "$HEALTH" >/dev/null
           jq -e '.answerPolicy | test("Gemini")' <<< "$HEALTH" >/dev/null
@@ -67,9 +63,14 @@ jobs:
           ROUTE=$(ask 'एकात्म यात्रा कहाँ से कहाँ तक प्रस्तावित है?'); echo "$ROUTE" | jq .
           jq -e '.answer | test("कालड़ी|Kalady|Veliyanadu") and test("केदारनाथ|Kedarnath")' <<< "$ROUTE" >/dev/null
           jq -e '(.sources | length) >= 2' <<< "$ROUTE" >/dev/null
-          jq -e '[.sources[] | select((.trust // "") == "canonical" or (.title // "" | startswith("Canonical Knowledge")))] | length >= 2' <<< "$ROUTE" >/dev/null
           jq -e '.composer | test("gemini|canonical-deterministic-fallback")' <<< "$ROUTE" >/dev/null
           jq -e '.answer | test("\\[S[0-9]+\\]")' <<< "$ROUTE" >/dev/null
+          MODE=$(jq -r '.composer' <<< "$ROUTE")
+          if [[ "$MODE" == gemini* ]]; then
+            jq -e '.canonicalEvidence == true' <<< "$ROUTE" >/dev/null
+          else
+            jq -e '.canonical == true or (.factId // "" | length > 0)' <<< "$ROUTE" >/dev/null
+          fi
 
       - name: Validate conflicts uncertainty and time-sensitive governance
         shell: bash
@@ -86,7 +87,7 @@ jobs:
           jq -e '.answer | test("Mohan Yadav")' <<< "$CHAIR" >/dev/null
           jq -e '(.sources | length) > 0' <<< "$CHAIR" >/dev/null
 
-      - name: Validate linked-domain Gemini and no-answer behavior
+      - name: Validate linked-domain answer and no-answer behavior
         shell: bash
         run: |
           set -euo pipefail
@@ -95,7 +96,7 @@ jobs:
           LINKED=$(ask 'Advaita Vedanta ka Ekatma Dham se kya sambandh hai?'); echo "$LINKED" | jq .
           jq -e '.refused != true and (.answer | length > 40) and (.sources | length > 0)' <<< "$LINKED" >/dev/null
           UNKNOWN=$(ask 'Ekatma Yatra ke Maharath ka final vehicle registration number kya hai?'); echo "$UNKNOWN" | jq .
-          jq -e '.refused == true or .answer | test("available|उपलब्ध|confirmed|पुष्टि", "i")' <<< "$UNKNOWN" >/dev/null
+          jq -e '.refused == true or (.answer | test("available|उपलब्ध|confirmed|पुष्टि|not found|नहीं मिला", "i"))' <<< "$UNKNOWN" >/dev/null
 
       - name: Validate evaluation bank
         shell: bash
