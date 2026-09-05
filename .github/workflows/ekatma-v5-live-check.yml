@@ -13,14 +13,14 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://ekatma-intelligence-os.onrender.com"
-          for i in $(seq 1 30); do
+          for i in $(seq 1 40); do
             H=$(curl -fsS "$URL/health" || true)
-            if jq -e '.version=="5.0.0" and .frontend=="React 18" and .qa930.questions==930' <<<"$H" >/dev/null 2>&1; then break; fi
+            if jq -e '.version=="5.1.0" and .frontend=="React 18" and .qa930.questions==930 and .geminiModel=="gemini-3.8-flash"' <<<"$H" >/dev/null 2>&1; then break; fi
             sleep 4
           done
           H=$(curl -fsS "$URL/health")
           echo "$H" | jq .
-          jq -e '.version=="5.0.0" and .frontend=="React 18" and .qa930.questions==930 and .canonicalKnowledge.facts==117 and .geminiConfigured==true' <<<"$H" >/dev/null
+          jq -e '.version=="5.1.0" and .frontend=="React 18" and .qa930.questions==930 and .qa930.categories==26 and .canonicalKnowledge.facts==117 and .geminiConfigured==true and .geminiModel=="gemini-3.8-flash"' <<<"$H" >/dev/null
 
           HTML=$(curl -fsS "$URL/")
           grep -qi 'react' <<<"$HTML"
@@ -31,7 +31,7 @@ jobs:
           A1=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"What is Ekatma Dham?","history":[]}')
           echo "$A1" | jq .
           ANS1=$(jq -r '.answer' <<<"$A1")
-          jq -e '.refused != true and .contextAware==true' <<<"$A1" >/dev/null
+          jq -e '.refused != true and .contextAware==true and (.answer|test("Ekatma Dham";"i"))' <<<"$A1" >/dev/null
 
           PAYLOAD=$(jq -nc --arg a "$ANS1" '{question:"Where is it located?",history:[{role:"user",content:"What is Ekatma Dham?"},{role:"assistant",content:$a}]}')
           A2=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data "$PAYLOAD")
@@ -48,4 +48,5 @@ jobs:
           MODE=$(jq -r '.composer // "none"' <<<"$ADV")
           MODEL=$(jq -r '.model // "none"' <<<"$ADV")
           echo "Gemini composer: $MODE / $MODEL"
-          [[ "$MODE" == gemini* ]]
+          [[ "$MODE" == "gemini-interactions" ]]
+          [[ "$MODEL" == *"gemini-3.8-flash"* ]]
