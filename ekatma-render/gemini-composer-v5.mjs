@@ -1,17 +1,14 @@
 const DOMAIN_RE=/(ekatma|ekatam|एकात्म|yatra|यात्रा|dham|धाम|nyas|न्यास|shankar|शंकर|advaita|अद्वैत|vedanta|vedant|वेदांत|वेदान्त|upanishad|उपनिषद|brahman|ब्रह्म|atman|आत्मा|maya|माया|moksha|मोक्ष|mahavakya|महावाक्य|omkareshwar|ओंकारेश्वर|oneness|peeth|पीठ|matha|mutt|मठ|gita|गीता|bhakti|भक्ति|karma yoga|कर्मयोग|jnana|ज्ञान)/i;
 const INSTITUTION_RE=/(ekatma|ekatam|एकात्म|yatra|यात्रा|dham|धाम|nyas|न्यास|maharath|महारथ|route|मार्ग|meeting|बैठक|decision|निर्णय|approval|approved|chairman|trustee|programme|program|event|contact|official|institution|संस्था|omkareshwar|ओंकारेश्वर|statue of oneness)/i;
+const CACHE=new Map();
+const CACHE_TTL=10*60*1000;
 
 function clip(s,n=6000){const x=String(s||'').replace(/\u0000/g,'').trim();return x.length>n?x.slice(0,n)+'…':x}
 function safeJson(text){try{return JSON.parse(text)}catch{const m=String(text||'').match(/\{[\s\S]*\}/);if(m)try{return JSON.parse(m[0])}catch{}return null}}
 function recentConversation(history=[]){return (history||[]).slice(-12).map(m=>`${m.role==='assistant'?'Assistant':'User'}: ${clip(m.content,1600)}`).join('\n')}
-function evidence(sources=[]){return (sources||[]).slice(0,10).map((s,i)=>{
-  const title=s.title||s.file_name||`Source ${i+1}`;
-  const text=s.content||s.excerpt||'';
-  const status=s.status?` | status=${s.status}`:'';
-  const date=s.document_date?` | verified/date=${s.document_date}`:'';
-  return `[S${i+1}] ${title}${status}${date}\n${clip(text,5000)}`;
-}).join('\n\n')}
+function evidence(sources=[]){return (sources||[]).slice(0,10).map((s,i)=>{const title=s.title||s.file_name||`Source ${i+1}`;const text=s.content||s.excerpt||'';const status=s.status?` | status=${s.status}`:'';const date=s.document_date?` | verified/date=${s.document_date}`:'';return `[S${i+1}] ${title}${status}${date}\n${clip(text,5000)}`}).join('\n\n')}
 function isGeneralPhilosophy(q){return /(advaita|अद्वैत|vedanta|vedant|वेदांत|वेदान्त|upanishad|उपनिषद|brahman|ब्रह्म|atman|आत्मा|maya|माया|moksha|मोक्ष|mahavakya|महावाक्य|shankaracharya|शंकराचार्य|gita|गीता|bhakti|भक्ति|karma yoga|कर्मयोग|jnana|ज्ञान)/i.test(String(q||''))&&!INSTITUTION_RE.test(String(q||''))}
+function cacheKey(question,history,sources){return JSON.stringify([String(question||'').trim(),(history||[]).slice(-6).map(m=>[m.role,clip(m.content,500)]),(sources||[]).slice(0,5).map(s=>[s.title||s.file_name,clip(s.content||s.excerpt,400)])])}
 
 const SYSTEM=`You are Ekatma Intelligence, a polished conversational assistant for Acharya Shankar Sanskritik Ekta Nyas, Ekatma Dham, Ekatma Yatra, Adi Shankaracharya and Advaita Vedanta.
 
@@ -28,36 +25,32 @@ GROUNDING RULES:
 
 Return JSON only with this shape: {"answer":"...","confidence":"high|medium|low"}.`;
 
-async function interactionCall({question,history,sources,baseAnswer}){
+async function callModel(model,{question,history,sources,baseAnswer}){
   const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('gemini_not_configured');
-  const model=process.env.GEMINI_MODEL||'gemini-3.8-flash';
-  const ev=evidence(sources);
-  const general=isGeneralPhilosophy(question);
+  const ev=evidence(sources),general=isGeneralPhilosophy(question);
   const input=`CURRENT USER QUESTION:\n${question}\n\nRECENT CONVERSATION:\n${recentConversation(history)||'(none)'}\n\nRETRIEVED EVIDENCE:\n${ev||'(none)'}\n\nCURRENT SAFE FALLBACK ANSWER (may be terse; improve it, do not blindly copy irrelevant parts):\n${clip(baseAnswer,6000)||'(none)'}\n\nGENERAL KNOWLEDGE: ${general?'ALLOWED only for general Advaita/Vedanta/Shankaracharya explanation.':'NOT ALLOWED for institutional facts beyond evidence.'}`;
-  const body={
-    model,
-    store:false,
-    input,
-    system_instruction:SYSTEM,
-    response_format:{
-      type:'text',
-      mime_type:'application/json',
-      schema:{type:'object',properties:{answer:{type:'string'},confidence:{type:'string',enum:['high','medium','low']}},required:['answer','confidence']}
-    }
-  };
+  const body={model,store:false,input,system_instruction:SYSTEM,response_format:{type:'text',mime_type:'application/json',schema:{type:'object',properties:{answer:{type:'string'},confidence:{type:'string',enum:['high','medium','low']}},required:['answer','confidence']}}};
   const r=await fetch('https://generativelanguage.googleapis.com/v1beta/interactions',{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)});
   const raw=await r.text();
-  if(!r.ok){let detail='';try{const j=JSON.parse(raw);detail=j?.error?.message||j?.message||''}catch{};console.error('GEMINI_INTERACTIONS_ERROR',r.status,clip(detail||raw,500));throw new Error(`gemini_interactions_${r.status}`)}
-  const j=JSON.parse(raw);
-  const text=String(j.output_text||'').trim();
-  if(!text){console.error('GEMINI_INTERACTIONS_EMPTY',j.status||'unknown');throw new Error('gemini_interactions_empty')}
+  if(!r.ok){let detail='';try{const j=JSON.parse(raw);detail=j?.error?.message||j?.message||''}catch{};console.error('GEMINI_INTERACTIONS_ERROR',r.status,model,clip(detail||raw,500));const e=new Error(`gemini_interactions_${r.status}`);e.status=r.status;throw e}
+  const j=JSON.parse(raw),text=String(j.output_text||'').trim();
+  if(!text)throw new Error('gemini_interactions_empty');
   const obj=safeJson(text);if(!obj?.answer)throw new Error('gemini_interactions_parse');
   return {answer:String(obj.answer).trim(),confidence:obj.confidence||'medium',model:j.model||model,interactionId:j.id||null,composer:'gemini-interactions'};
+}
+
+async function interactionCall(args){
+  const models=[process.env.GEMINI_MODEL||'gemini-3.8-flash','gemini-2.5-flash-lite','gemini-2.5-flash'].filter((x,i,a)=>x&&a.indexOf(x)===i);
+  let last;
+  for(const model of models){try{return await callModel(model,args)}catch(e){last=e;if(![429,404,400].includes(e?.status))break}}
+  throw last||new Error('gemini_interactions_failure');
 }
 
 export async function polishWithGemini({question,history=[],result={}}){
   if(!DOMAIN_RE.test(`${question} ${(history||[]).slice(-4).map(x=>x.content||'').join(' ')}`))return null;
   if(result?.refused===true||['social','policy','scope-redirect'].includes(result?.composer))return null;
-  try{return await interactionCall({question,history,sources:result.sources||[],baseAnswer:result.answer||''})}
+  const key=cacheKey(question,history,result.sources||[]),cached=CACHE.get(key);
+  if(cached&&Date.now()-cached.at<CACHE_TTL)return {...cached.value,composer:'gemini-cache'};
+  try{const value=await interactionCall({question,history,sources:result.sources||[],baseAnswer:result.answer||''});CACHE.set(key,{at:Date.now(),value});if(CACHE.size>250){const first=CACHE.keys().next().value;CACHE.delete(first)}return value}
   catch(e){console.error('GEMINI_COMPOSER_FALLBACK',e?.message||e);return null}
 }
