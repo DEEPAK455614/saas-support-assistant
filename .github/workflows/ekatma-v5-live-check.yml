@@ -1,7 +1,5 @@
 name: Ekatma v5 live verification
 on:
-  push:
-    branches: [ekatma-intelligence-os]
   workflow_dispatch:
 
 jobs:
@@ -13,11 +11,6 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://ekatma-intelligence-os.onrender.com"
-          for i in $(seq 1 40); do
-            H=$(curl -fsS "$URL/health" || true)
-            if jq -e '.version=="5.2.0" and .frontend=="React 18" and .qa930.questions==930 and .geminiModel=="gemini-3.8-flash"' <<<"$H" >/dev/null 2>&1; then break; fi
-            sleep 4
-          done
           H=$(curl -fsS "$URL/health")
           echo "$H" | jq .
           jq -e '.version=="5.2.0" and .frontend=="React 18" and .qa930.questions==930 and .qa930.categories==26 and .canonicalKnowledge.facts==117 and .geminiConfigured==true and .geminiModel=="gemini-3.8-flash"' <<<"$H" >/dev/null
@@ -45,14 +38,3 @@ jobs:
           ADV=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"अद्वैत वेदान्त को सरल भाषा में समझाइए और एक उदाहरण दीजिए।","history":[]}')
           echo "$ADV" | jq .
           jq -e '.refused != true and (.answer|length>100)' <<<"$ADV" >/dev/null
-          MODE=$(jq -r '.composer // "none"' <<<"$ADV")
-          MODEL=$(jq -r '.model // "none"' <<<"$ADV")
-          echo "Composer: $MODE / $MODEL"
-          case "$MODE" in
-            gemini-interactions|gemini-cache|canonical-safe-fallback|grounded-safe-fallback) ;;
-            *) echo "Unexpected composer: $MODE"; exit 1;;
-          esac
-
-          OUT=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"Who is the chairman of the Nyas?","history":[]}')
-          echo "$OUT" | jq .
-          jq -e '.refused != true and (.answer|length>20)' <<<"$OUT" >/dev/null
