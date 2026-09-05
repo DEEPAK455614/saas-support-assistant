@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { canonicalFacts, sourceRegistry, probableQuestionGroups, canonicalStats } from './canonical-layer.mjs';
 import { answerConversation } from './conversation-engine.mjs';
+import { polishWithGemini } from './gemini-composer-v5.mjs';
 import { qaCorpus, qaSearch, qaResultToSource, qaStats, qaSourceRegistry, qaDataPolicy } from './qa-corpus.mjs';
 import './canonical-sync.mjs';
 
-const VERSION='5.0.0';
+const VERSION='5.1.0';
 const PORTAL_HASH='02c68d33f7539ad63a46dd07a1401aadf1bd610177d7005e914e971b674316bf';
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const REACT_UI=fs.readFileSync(path.join(ROOT,'react-ui.html'),'utf8');
@@ -42,15 +43,9 @@ function buildRetrievalQuery(question,history=[]){
 }
 function chunkText(text,size=2600,overlap=260){const t=String(text||'').replace(/\r/g,'').trim(),out=[];for(let start=0;start<t.length;start+=size-overlap){const content=t.slice(start,start+size).trim();if(content.length>40)out.push({pageNumber:null,sectionTitle:null,content,metadata:{}});if(start+size>=t.length)break}return out.slice(0,500)}
 async function kbCall(action,payload={}){const url=process.env.KB_FUNCTION_URL,token=process.env.EKATMA_ADMIN_TOKEN;if(!url||!token)throw new Error('knowledge_backend_not_configured');const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json','x-ekatma-admin':token},body:JSON.stringify({action,...payload})});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||j.detail||`knowledge_backend_${r.status}`);return j}
-async function ingestTextUpload(body){const raw=Buffer.from(String(body.base64||''),'base64');if(!raw.length)throw Object.assign(new Error('empty_file'),{status:400});const text=raw.toString('utf8').trim();if(!text)throw Object.assign(new Error('no_extractable_text'),{status:400});const chunks=chunkText(text);const result=await kbCall('ingest',{fileName:String(body.fileName||'knowledge.txt'),mimeType:String(body.mimeType||'text/plain'),base64:raw.toString('base64'),sizeBytes:raw.length,title:String(body.title||body.fileName||'Knowledge').trim(),documentDate:body.documentDate||null,trust:body.trust||'verified',sourceType:'portal_upload',notes:body.notes||'Uploaded through Ekatma Knowledge Portal',chunks});return {...result,indexing:'lexical-ready',syncedWithChat:true}
-}
-function mergeSources(qa,base){
-  const out=[],seen=new Set();
-  for(const s of [...qa,...base]){const key=norm(`${s.origin||''}|${s.title||''}|${s.content||s.excerpt||''}`).slice(0,900);if(!key||seen.has(key))continue;seen.add(key);out.push(s);if(out.length>=12)break;}
-  return out;
-}
+async function ingestTextUpload(body){const raw=Buffer.from(String(body.base64||''),'base64');if(!raw.length)throw Object.assign(new Error('empty_file'),{status:400});const text=raw.toString('utf8').trim();if(!text)throw Object.assign(new Error('no_extractable_text'),{status:400});const chunks=chunkText(text);const result=await kbCall('ingest',{fileName:String(body.fileName||'knowledge.txt'),mimeType:String(body.mimeType||'text/plain'),base64:raw.toString('base64'),sizeBytes:raw.length,title:String(body.title||body.fileName||'Knowledge').trim(),documentDate:body.documentDate||null,trust:body.trust||'verified',sourceType:'portal_upload',notes:body.notes||'Uploaded through Ekatma Knowledge Portal',chunks});return {...result,indexing:'lexical-ready',syncedWithChat:true}}
+function mergeSources(qa,base){const out=[],seen=new Set();for(const s of [...qa,...base]){const key=norm(`${s.origin||''}|${s.title||''}|${s.content||s.excerpt||''}`).slice(0,900);if(!key||seen.has(key))continue;seen.add(key);out.push(s);if(out.length>=12)break;}return out}
 async function rawInternalFetch(urlPath,{method='GET',headers={},body}={}){return fetch(`http://127.0.0.1:${INTERNAL_PORT}${urlPath}`,{method,headers:headersForFetch(headers),body})}
-async function internalFetch(urlPath,opts={}){return rawInternalFetch(urlPath,opts)}
 function contextualInternalFetch(retrievalQuery){
   return async(urlPath,opts={})=>{
     try{
@@ -74,9 +69,11 @@ async function handleChat(req,res,body){
   const history=(Array.isArray(payload.history)?payload.history:[]).slice(-24).map(m=>({role:m.role==='assistant'?'assistant':'user',content:clip(m.content,2400)}));
   const retrievalQuery=buildRetrievalQuery(question,history);
   const result=await answerConversation({question,history,internalFetch:contextualInternalFetch(retrievalQuery)});
+  const polished=await polishWithGemini({question,history,result});
+  if(polished)return sendJson(res,200,{...result,...polished,sources:result.sources||[],grounded:result.grounded,contextAware:true});
   return sendJson(res,200,{...result,contextAware:true});
 }
-async function health(res){let base={};try{const r=await rawInternalFetch('/health');if(r.ok)base=await r.json()}catch{}return sendJson(res,200,{...base,ok:true,service:'Ekatma Intelligence OS',version:VERSION,frontend:'React 18',canonicalKnowledge:canonicalStats(),qa930:qaStats(),geminiConfigured:!!process.env.GEMINI_API_KEY,answerPolicy:'conversation context > canonical + 930-QA + managed uploads > Gemini natural composition > safe grounded fallback',knowledgePortal:'/knowledge',knowledgeSync:'portal uploads and chat query the same managed knowledge store'});}
+async function health(res){let base={};try{const r=await rawInternalFetch('/health');if(r.ok)base=await r.json()}catch{}return sendJson(res,200,{...base,ok:true,service:'Ekatma Intelligence OS',version:VERSION,frontend:'React 18',canonicalKnowledge:canonicalStats(),qa930:qaStats(),geminiConfigured:!!process.env.GEMINI_API_KEY,geminiModel:process.env.GEMINI_MODEL||'gemini-3.8-flash',answerPolicy:'conversation context > canonical + 930-QA + managed uploads > Gemini 3.8 grounded composition > safe grounded fallback',knowledgePortal:'/knowledge',knowledgeSync:'portal uploads and chat query the same managed knowledge store'});}
 function knowledgeOverview(req,res){if(!portalOK(req))return sendJson(res,401,{error:'unauthorized'});const facts=canonicalFacts.map(f=>({fact_id:f.fact_id,topic:f.topic,question:f.canonical_question,answer:f.canonical_answer,status:f.status,confidence:f.confidence,verified_on:f.verified_on||null,source_ids:f.source_ids||[]}));const sources=Object.entries(sourceRegistry).map(([source_id,s])=>({source_id,...s}));return sendJson(res,200,{stats:canonicalStats(),qa930:qaStats(),facts,sources,qaSources:qaSourceRegistry,dataPolicy:qaDataPolicy,sync:'live-managed-kb'});}
 function qaList(req,res,u){if(!portalOK(req))return sendJson(res,401,{error:'unauthorized'});const q=String(u.searchParams.get('q')||'').trim(),category=String(u.searchParams.get('category')||'').trim();const offset=Math.max(0,Number(u.searchParams.get('offset')||0)),limit=Math.max(1,Math.min(Number(u.searchParams.get('limit')||50),100));let rows=q?qaSearch(q,{limit:100,minScore:.10}):qaCorpus;if(category)rows=rows.filter(r=>r.category===category);const categories=[...new Set(qaCorpus.map(x=>x.category))].sort();return sendJson(res,200,{total:rows.length,offset,limit,categories,rows:rows.slice(offset,offset+limit)});}
 async function kbStats(req,res){if(!portalOK(req))return sendJson(res,401,{error:'unauthorized'});let managed={documents:0,chunks:0,embeddedChunks:0};try{const r=await rawInternalFetch('/api?op=stats');if(r.ok)managed=await r.json()}catch{}return sendJson(res,200,{managed,canonical:canonicalStats(),qa930:qaStats()});}
@@ -106,4 +103,4 @@ const gateway=http.createServer(async(req,res)=>{try{
   return forward(req,res);
 }catch(e){console.error('gateway_error',e?.message||e);return sendJson(res,e?.status||500,{error:e?.message||'gateway_error'})}});
 
-setTimeout(()=>gateway.listen(PUBLIC_PORT,'0.0.0.0',()=>console.log(`Ekatma Intelligence OS ${VERSION} on ${PUBLIC_PORT} | React | context-aware | ${qaStats().questions} QA | ${canonicalStats().facts} canonical facts`)),40);
+setTimeout(()=>gateway.listen(PUBLIC_PORT,'0.0.0.0',()=>console.log(`Ekatma Intelligence OS ${VERSION} on ${PUBLIC_PORT} | React | Gemini 3.8 final composer | context-aware | ${qaStats().questions} QA | ${canonicalStats().facts} canonical facts`)),40);
