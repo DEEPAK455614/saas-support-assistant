@@ -4,6 +4,7 @@ on:
     branches: [ekatma-intelligence-os]
   workflow_dispatch:
 
+# Post-deploy validation for strict-grounded production behavior.
 jobs:
   live-smoke:
     runs-on: ubuntu-latest
