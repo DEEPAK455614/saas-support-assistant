@@ -7,8 +7,8 @@ const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const payloadDir=path.join(ROOT,'payload');
 const keyHex=process.env.BUNDLE_KEY;
 if(!keyHex || !/^[0-9a-f]{64}$/i.test(keyHex)) throw new Error('BUNDLE_KEY missing or invalid');
-const files=fs.readdirSync(payloadDir).filter(f=>/^part\d+$/.test(f)).sort();
-if(!files.length) throw new Error('Encrypted payload parts missing');
+const files=['part00','part01','part02','part03a','part03b','part04','part05','part06a','part06b','part07'];
+for(const f of files){ if(!fs.existsSync(path.join(payloadDir,f))) throw new Error(`Encrypted payload part missing: ${f}`); }
 const b64=files.map(f=>fs.readFileSync(path.join(payloadDir,f),'utf8')).join('');
 const blob=Buffer.from(b64,'base64');
 if(blob.subarray(0,4).toString()!=='EKI1') throw new Error('Invalid encrypted bundle header');
