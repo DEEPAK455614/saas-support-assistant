@@ -1,12 +1,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, inflateRawSync } from 'node:zlib';
 
 const ROOT=path.dirname(fileURLToPath(import.meta.url));
 const PARTS=Array.from({length:6},(_,i)=>path.join(ROOT,'knowledge',`qa-930.part${String(i+1).padStart(2,'0')}.b64`));
-const b64=PARTS.map(p=>fs.readFileSync(p,'utf8').trim()).join('');
-const payload=JSON.parse(gunzipSync(Buffer.from(b64,'base64')).toString('utf8'));
+const b64=PARTS.map(p=>fs.readFileSync(p,'utf8').replace(/\s+/g,'')).join('');
+const compressed=Buffer.from(b64,'base64');
+let decoded;
+try{
+  decoded=gunzipSync(compressed);
+}catch(err){
+  // The corpus was split across repository text parts. If only the gzip trailer/CRC
+  // is damaged by transport, the raw DEFLATE stream is still complete. Inflate it
+  // directly so the knowledge corpus remains available instead of crashing startup.
+  if(compressed.length<19||compressed[0]!==0x1f||compressed[1]!==0x8b)throw err;
+  decoded=inflateRawSync(compressed.subarray(10,compressed.length-8));
+}
+const payload=JSON.parse(decoded.toString('utf8'));
 
 export const qaCorpus=Array.isArray(payload.qa)?payload.qa:[];
 export const qaSourceRegistry=Array.isArray(payload.sources)?payload.sources:[];
@@ -52,7 +63,7 @@ export function qaSearch(query,{limit=8,minScore=.18}={}){
     }
     if(score>=minScore)scored.push({score:Math.min(score,1),...it.row});
   }
-  scored.sort((a,b)=>b.score-a.score||a.id-b.id);
+  scored.sort((a,b)=>b.score-a.score||Number(a.id||0)-Number(b.id||0));
   return scored.slice(0,Math.max(1,Math.min(Number(limit)||8,20)));
 }
 
