@@ -15,12 +15,18 @@ const {default:apiHandler}=await import(pathToFileURL(apiPath).href);
 const INDEX=fs.readFileSync(indexPath,'utf8');
 
 const REFUSAL='इस प्रश्न के लिए उपलब्ध Ekatma knowledge base में विश्वसनीय संदर्भ नहीं मिला। संबंधित meeting, document या verified source जोड़ने पर मैं उसे evidence के साथ analyse कर सकता हूँ।';
-const WELCOME=`॥ सर्वं खल्विदं ब्रह्म ॥\n\nहरिः ॐ 🙏\nEkatma Intelligence OS में आपका स्वागत है।\n\nयहाँ meetings, documents, people, routes, decisions और field intelligence अलग-अलग टुकड़े नहीं हैं — वे एक ही व्यापक दृष्टि के रूप में जुड़े हैं।\n\n**Oneness: अनेक स्रोत, एक स्पष्ट समझ।**\nपूछिए — आज आप किस विषय को स्पष्ट देखना चाहते हैं?`;
-const BUILDER=`Ekatma Intelligence OS को **Deepak Tiwari** ने design, develop और build किया है। वे इस intelligence system के developer और builder हैं।`;
+const ADVAITA_HEADER=`॥ सर्वं खल्विदं ब्रह्म ॥\n**अद्वैत दृष्टि:** अनेक रूप, अनेक स्रोत — पर सत्य एक।`;
+const CAPABILITY_FOOTER=`मैं इससे जुड़ी **meetings, decisions, timeline, action items, people, routes और source evidence** भी खोलकर दिखा सकता हूँ। **क्या आप यह भी जानना चाहेंगे?**\n\nहरिः ॐ 🙏`;
+const WELCOME=`**Ekatma Intelligence OS में आपका स्वागत है।**\n\nयहाँ meetings, documents, people, routes, decisions और field intelligence अलग-अलग टुकड़े नहीं हैं — वे एक ही व्यापक दृष्टि में जुड़े हैं।\n\n**Oneness: अनेक स्रोत, एक स्पष्ट समझ।**\nपूछिए — आज आप किस विषय को स्पष्ट देखना चाहते हैं?`;
+const BUILDER=`### Developer & Builder — Deepak Tiwari\n\n**Deepak Tiwari** ने Ekatma Intelligence OS को concept, design, develop और build किया है। वे इस system के **Developer, Builder और Product Architect** हैं।\n\nयह intelligence platform **Ekatma Dham, Ekatma Yatra और Acharya Shankar Sanskritik Ekta Nyas** के institutional knowledge और operations को एक जगह जोड़ने के लिए बनाया गया है।\n\nइसके प्रमुख हिस्सों में meeting intelligence, PDF/document knowledge, evidence-grounded search, decision tracking, action items, timeline analysis, people & network intelligence, route/place intelligence, research workflows, source citations और conversational history शामिल हैं।\n\nउद्देश्य केवल जानकारी याद रखना नहीं है — बल्कि उपलब्ध verified knowledge को **स्पष्ट निर्णय, समन्वित कार्य और संस्थागत स्मृति** में बदलना है।`;
 
+function decorateAnswer(text){
+  const body=String(text||'').trim()||REFUSAL;
+  return `${ADVAITA_HEADER}\n\n${body}\n\n---\n${CAPABILITY_FOOTER}`;
+}
 function norm(s=''){return String(s).normalize('NFKC').toLowerCase().replace(/[’']/g,'').replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();}
 function isGreeting(q){return /^(hi+|hii+|hello+|hey+|namaste|namaskar|pranam|hari om|हरि ओम|नमस्ते|नमस्कार|प्रणाम)( ji)?$/.test(norm(q));}
-function isBuilderQuestion(q){const n=norm(q);return /(who (made|built|developed|created) you|who is your (developer|builder|creator)|your (developer|builder|creator)|kisne (banaya|build|develop)|developer kaun|builder kaun|creator kaun|किसने.*(बनाया|डेवलप|बिल्ड)|आपको किसने|तुम्हें किसने|तुमको किसने)/i.test(n);}
+function isBuilderQuestion(q){const n=norm(q);return /(who (made|built|developed|created|designed) you|who is your (developer|builder|creator|architect)|your (developer|builder|creator|architect)|who built this|who developed this|who made this|who created this|kisne (banaya|build|develop|design)|developer kaun|builder kaun|creator kaun|architect kaun|किसने.*(बनाया|डेवलप|बिल्ड|डिजाइन)|आपको किसने|तुम्हें किसने|तुमको किसने|इसे किसने)/i.test(n);}
 function jsonRes(data,status=200){return new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});}
 function sendNode(res,response){res.writeHead(response.status,Object.fromEntries(response.headers.entries()));return response.arrayBuffer().then(b=>res.end(Buffer.from(b)));}
 
@@ -68,7 +74,7 @@ async function callGemini(question,mode,sources,history){
   const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('engine_not_configured');
   const ev=sources.map((s,i)=>`[S${i+1}] ${s.title}${s.page?` | page ${s.page}`:(s.pages?` | pages ${s.pages}`:'')}${s.start?` | ${s.start}-${s.end||''}`:''}${s.date?` | ${s.date}`:''}\n${String(s.excerpt||'').slice(0,1400)}`).join('\n\n');
   const recent=(history||[]).slice(-6).map(m=>`${m.role==='assistant'?'Assistant':'User'}: ${String(m.content||'').slice(0,700)}`).join('\n');
-  const prompt=`You are Ekatma Intelligence OS, an evidence-grounded operational intelligence system for Ekatma Dham, Ekatma Yatra and Acharya Shankar Sanskritik Ekta Nyas.\n\nRULES:\n1. Use ONLY EVIDENCE below. Never use outside/pretrained facts.\n2. Cite important factual claims with [S#].\n3. Separate discussed/proposed from decided/finalised.\n4. If evidence is insufficient, reply exactly: ${REFUSAL}\n5. Match the user's language and answer directly.\n6. Do not mention model/provider/retrieval.\n\nRecent conversation is context only, not evidence:\n${recent||'(none)'}\n\nQuestion: ${question}\nMode: ${mode}\n\nEVIDENCE:\n${ev}`;
+  const prompt=`You are Ekatma Intelligence OS, an evidence-grounded operational intelligence system for Ekatma Dham, Ekatma Yatra and Acharya Shankar Sanskritik Ekta Nyas.\n\nRULES:\n1. Use ONLY EVIDENCE below. Never use outside/pretrained facts.\n2. Cite important factual claims with [S#].\n3. Separate discussed/proposed from decided/finalised.\n4. If evidence is insufficient, reply exactly: ${REFUSAL}\n5. Match the user's language and answer directly.\n6. Do not mention model/provider/retrieval.\n7. Do not add greetings, spiritual framing or closing phrases; the application adds those consistently.\n\nRecent conversation is context only, not evidence:\n${recent||'(none)'}\n\nQuestion: ${question}\nMode: ${mode}\n\nEVIDENCE:\n${ev}`;
   const discovered=await availableModels(key);
   const preferred=[process.env.GEMINI_MODEL,'gemini-3.8-flash','gemini-3.7-flash','gemini-2.5-flash','gemini-flash-latest'].filter(Boolean);
   const models=[...new Set([...preferred.filter(m=>!discovered.length||discovered.includes(m)),...discovered.filter(m=>/flash/i.test(m))])].slice(0,8);
@@ -104,14 +110,20 @@ const server=http.createServer(async(req,res)=>{
       if(req.method==='POST'){
         const parts=[];for await(const c of req)parts.push(c);const body=JSON.parse(Buffer.concat(parts).toString('utf8')||'{}');
         const question=String(body.question||'').trim(),mode=String(body.mode||'ask');
-        if(!question)return sendNode(res,jsonRes({answer:REFUSAL,sources:[],grounded:true,refused:true}));
-        if(isGreeting(question))return sendNode(res,jsonRes({answer:WELCOME,sources:[],grounded:true,refused:false,systemMessage:true}));
-        if(isBuilderQuestion(question))return sendNode(res,jsonRes({answer:BUILDER,sources:[],grounded:true,refused:false,systemMessage:true}));
+        if(!question)return sendNode(res,jsonRes({answer:decorateAnswer(REFUSAL),sources:[],grounded:true,refused:true}));
+        if(isGreeting(question))return sendNode(res,jsonRes({answer:decorateAnswer(WELCOME),sources:[],grounded:true,refused:false,systemMessage:true}));
+        if(isBuilderQuestion(question))return sendNode(res,jsonRes({answer:decorateAnswer(BUILDER),sources:[],grounded:true,refused:false,systemMessage:true}));
         const [old,neu]=await Promise.all([oldSearch(base,question,mode),Promise.resolve(overlayRetrieve(question,10))]);
         const merged=dedupeSources([...neu,...old],10);
-        if(!merged.length)return sendNode(res,jsonRes({answer:REFUSAL,sources:[],grounded:true,refused:true}));
-        try{const out=await callGemini(question,mode,merged,body.history);return sendNode(res,jsonRes({answer:out.text,sources:merged,grounded:true,refused:out.text===REFUSAL}));}
-        catch(e){console.error('answer_generation_fallback',e?.message||e);return sendNode(res,jsonRes({answer:fallbackFromEvidence(merged),sources:merged,grounded:true,refused:false,fallback:true}));}
+        if(!merged.length)return sendNode(res,jsonRes({answer:decorateAnswer(REFUSAL),sources:[],grounded:true,refused:true}));
+        try{
+          const out=await callGemini(question,mode,merged,body.history);
+          const refused=out.text===REFUSAL;
+          return sendNode(res,jsonRes({answer:decorateAnswer(out.text),sources:merged,grounded:true,refused}));
+        }catch(e){
+          console.error('answer_generation_fallback',e?.message||e);
+          return sendNode(res,jsonRes({answer:decorateAnswer(fallbackFromEvidence(merged)),sources:merged,grounded:true,refused:false,fallback:true}));
+        }
       }
       const response=await apiHandler(new Request(base+req.url,{method:req.method,headers:req.headers}));return sendNode(res,response);
     }
@@ -119,4 +131,4 @@ const server=http.createServer(async(req,res)=>{
     res.writeHead(404,{'content-type':'application/json'});return res.end(JSON.stringify({error:'Not found'}));
   }catch(e){console.error('server_error',e);res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({error:'Internal error'}));}
 });
-const port=Number(process.env.PORT||10000);server.listen(port,'0.0.0.0',()=>console.log(`Ekatma Intelligence OS listening on ${port} | overlay ${overlay.length} | Gemini router v2`));
+const port=Number(process.env.PORT||10000);server.listen(port,'0.0.0.0',()=>console.log(`Ekatma Intelligence OS listening on ${port} | overlay ${overlay.length} | Gemini router v3 + Advaita frame`));
