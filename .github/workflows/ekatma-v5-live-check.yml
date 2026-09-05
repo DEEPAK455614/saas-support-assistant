@@ -1,0 +1,51 @@
+name: Ekatma v5 live verification
+on:
+  push:
+    branches: [ekatma-intelligence-os]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify React, 930-QA, context and Gemini
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://ekatma-intelligence-os.onrender.com"
+          for i in $(seq 1 30); do
+            H=$(curl -fsS "$URL/health" || true)
+            if jq -e '.version=="5.0.0" and .frontend=="React 18" and .qa930.questions==930' <<<"$H" >/dev/null 2>&1; then break; fi
+            sleep 4
+          done
+          H=$(curl -fsS "$URL/health")
+          echo "$H" | jq .
+          jq -e '.version=="5.0.0" and .frontend=="React 18" and .qa930.questions==930 and .canonicalKnowledge.facts==117 and .geminiConfigured==true' <<<"$H" >/dev/null
+
+          HTML=$(curl -fsS "$URL/")
+          grep -qi 'react' <<<"$HTML"
+          grep -qi 'multiple' <<<"$HTML"
+          KHTML=$(curl -fsS "$URL/knowledge")
+          grep -qi 'knowledge' <<<"$KHTML"
+
+          A1=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"What is Ekatma Dham?","history":[]}')
+          echo "$A1" | jq .
+          ANS1=$(jq -r '.answer' <<<"$A1")
+          jq -e '.refused != true and .contextAware==true' <<<"$A1" >/dev/null
+
+          PAYLOAD=$(jq -nc --arg a "$ANS1" '{question:"Where is it located?",history:[{role:"user",content:"What is Ekatma Dham?"},{role:"assistant",content:$a}]}')
+          A2=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data "$PAYLOAD")
+          echo "$A2" | jq .
+          jq -e '.refused != true and .contextAware==true and (.answer|test("Omkareshwar|Khandwa|Madhya Pradesh";"i"))' <<<"$A2" >/dev/null
+
+          QA=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"MP government ka isme kya role hai?","history":[{"role":"user","content":"Ekatma Dham ke baare mein batao"}]}')
+          echo "$QA" | jq .
+          jq -e '.refused != true and (.answer|test("Department of Culture|Culture Department|संस्कृति विभाग|मध्य प्रदेश";"i"))' <<<"$QA" >/dev/null
+
+          ADV=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"अद्वैत वेदान्त को सरल भाषा में समझाइए और एक उदाहरण दीजिए।","history":[]}')
+          echo "$ADV" | jq .
+          jq -e '.refused != true and (.answer|length>100)' <<<"$ADV" >/dev/null
+          MODE=$(jq -r '.composer // "none"' <<<"$ADV")
+          MODEL=$(jq -r '.model // "none"' <<<"$ADV")
+          echo "Gemini composer: $MODE / $MODEL"
+          [[ "$MODE" == gemini* ]]
