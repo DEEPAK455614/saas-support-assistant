@@ -57,12 +57,22 @@ export function matchCanonical(question,{threshold=.67}={}){
   if(!best||best.score<threshold)return null;
   return best;
 }
+function reverseForms(f){
+  const q=String(f.canonical_question||'').trim(),plain=q.replace(/[?.!]+$/,'');
+  const forms=[q,`Please explain: ${plain}.`,`Give the verified answer to: ${plain}.`,`What should I know about this: ${plain}?`,...(f.variants||[]),`${plain} ke baare me authentic information do.`,`${plain} ka verified answer kya hai?`,`${plain} का नवीनतम सत्यापित उत्तर क्या है?`];
+  if(f.time_sensitive)forms.push(`${plain} — latest official status kya hai?`);
+  if(f.status==='provisional'||f.status==='conflicting_sources')forms.push(`Is ${plain.toLowerCase()} final or still provisional?`);
+  if(f.status==='not_publicly_confirmed')forms.push(`Is this officially confirmed: ${plain}?`);
+  if(f.status==='tradition_sensitive')forms.push(`${plain} को परंपरा के अनुसार समझाइए।`);
+  return [...new Set(forms.filter(Boolean))];
+}
 export function probableQuestionGroups(){
   const groups=new Map();
-  for(const f of canonicalFacts){if(!groups.has(f.topic))groups.set(f.topic,[]);const arr=groups.get(f.topic);for(const q of [f.canonical_question,...(f.variants||[])])if(!arr.includes(q))arr.push(q);}
+  for(const f of canonicalFacts){if(!groups.has(f.topic))groups.set(f.topic,[]);const arr=groups.get(f.topic);for(const q of reverseForms(f))if(!arr.includes(q))arr.push(q);}
   return [...groups].map(([name,questions])=>({name,questions}));
 }
 export function canonicalStats(){
   const status={},topics={};for(const f of canonicalFacts){status[f.status]=(status[f.status]||0)+1;topics[f.topic]=(topics[f.topic]||0)+1;}
-  return {facts:canonicalFacts.length,questionForms:canonicalFacts.reduce((n,f)=>n+1+(f.variants?.length||0),0),topics:Object.keys(topics).length,status,topicCounts:topics,sources:Object.keys(sourceRegistry).length};
+  const reverseQuestionForms=probableQuestionGroups().reduce((n,g)=>n+g.questions.length,0);
+  return {facts:canonicalFacts.length,questionForms:canonicalFacts.reduce((n,f)=>n+1+(f.variants?.length||0),0),reverseQuestionForms,topics:Object.keys(topics).length,status,topicCounts:topics,sources:Object.keys(sourceRegistry).length};
 }
