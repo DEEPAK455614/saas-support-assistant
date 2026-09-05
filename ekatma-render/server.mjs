@@ -40,6 +40,10 @@ function buildRetrievalQuery(question,history=[]){
   const context=[lastUser?.content?`Previous user topic: ${clip(lastUser.content,700)}`:'',lastAssistant?.content?`Previous answer context: ${clip(lastAssistant.content,950)}`:''].filter(Boolean).join(' | ');
   return context?`${q}\nContext for resolving references: ${context}`:q;
 }
+function chunkText(text,size=2600,overlap=260){const t=String(text||'').replace(/\r/g,'').trim(),out=[];for(let start=0;start<t.length;start+=size-overlap){const content=t.slice(start,start+size).trim();if(content.length>40)out.push({pageNumber:null,sectionTitle:null,content,metadata:{}});if(start+size>=t.length)break}return out.slice(0,500)}
+async function kbCall(action,payload={}){const url=process.env.KB_FUNCTION_URL,token=process.env.EKATMA_ADMIN_TOKEN;if(!url||!token)throw new Error('knowledge_backend_not_configured');const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json','x-ekatma-admin':token},body:JSON.stringify({action,...payload})});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||j.detail||`knowledge_backend_${r.status}`);return j}
+async function ingestTextUpload(body){const raw=Buffer.from(String(body.base64||''),'base64');if(!raw.length)throw Object.assign(new Error('empty_file'),{status:400});const text=raw.toString('utf8').trim();if(!text)throw Object.assign(new Error('no_extractable_text'),{status:400});const chunks=chunkText(text);const result=await kbCall('ingest',{fileName:String(body.fileName||'knowledge.txt'),mimeType:String(body.mimeType||'text/plain'),base64:raw.toString('base64'),sizeBytes:raw.length,title:String(body.title||body.fileName||'Knowledge').trim(),documentDate:body.documentDate||null,trust:body.trust||'verified',sourceType:'portal_upload',notes:body.notes||'Uploaded through Ekatma Knowledge Portal',chunks});return {...result,indexing:'lexical-ready',syncedWithChat:true}
+}
 function mergeSources(qa,base){
   const out=[],seen=new Set();
   for(const s of [...qa,...base]){const key=norm(`${s.origin||''}|${s.title||''}|${s.content||s.excerpt||''}`).slice(0,900);if(!key||seen.has(key))continue;seen.add(key);out.push(s);if(out.length>=12)break;}
@@ -86,6 +90,13 @@ const gateway=http.createServer(async(req,res)=>{try{
   if(req.method==='GET'&&u.pathname==='/api/admin/knowledge-overview')return knowledgeOverview(req,res);
   if(req.method==='GET'&&u.pathname==='/api/admin/qa')return qaList(req,res,u);
   if(req.method==='GET'&&u.pathname==='/api/admin/kb-stats')return kbStats(req,res);
+  if(req.method==='POST'&&u.pathname==='/api/admin/upload'){
+    if(!portalOK(req))return sendJson(res,401,{error:'unauthorized'});
+    const raw=await readBody(req),body=JSON.parse(raw.toString('utf8')||'{}');
+    const mime=String(body.mimeType||'').toLowerCase();
+    if(mime.startsWith('text/'))return sendJson(res,200,await ingestTextUpload(body));
+    return forward(req,res,raw,null,internalAdminHeaders(req));
+  }
   if(u.pathname.startsWith('/api/admin/')){
     if(!portalOK(req))return sendJson(res,401,{error:'unauthorized'});
     const body=req.method==='GET'||req.method==='HEAD'?null:await readBody(req);
