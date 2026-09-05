@@ -1,15 +1,18 @@
-import { matchCanonical, canonicalAnswerObject } from './canonical-layer.mjs';
+import { matchCanonical, canonicalAnswerObject, canonicalFacts } from './canonical-layer.mjs';
 
+const FACT_MAP=new Map(canonicalFacts.map(f=>[f.fact_id,f]));
 const DOMAIN_TERMS=[
   'ekatma','ekatam','एकात्म','yatra','यात्रा','dham','धाम','nyas','न्यास','acharya shankar','आचार्य शंकर',
   'adi shankar','adi shankara','आदि शंकर','shankaracharya','शंकराचार्य','advaita','अद्वैत','vedanta','vedant','वेदांत','वेदान्त',
   'upanishad','उपनिषद','brahman','ब्रह्म','atman','आत्मा','maya','माया','moksha','मोक्ष','mahavakya','महावाक्य',
-  'sringeri','शृंगेरी','श्रृंगेरी','dwarka','द्वारका','puri','पुरी','jyotirmath','ज्योतिर्मठ','peetha','पीठ','matha','मठ',
+  'sringeri','शृंगेरी','श्रृंगेरी','dwarka','द्वारका','puri','पुरी','jyotirmath','ज्योतिर्मठ','peetha','peeth','peetham','पीठ','matha','mutt','मठ','kanchi','कांची',
   'omkareshwar','ओंकारेश्वर','oneness','statue of oneness','maharath','महारथ','rath yatra','रथ यात्रा','kaladi','kalady','कालड़ी','kedarnath','केदारनाथ',
-  'govinda bhagavatpada','गोविन्द भगवत्पाद','sannyasa','संन्यास','shastra','शास्त्र','gita','गीता','brahma sutra','ब्रह्मसूत्र'
+  'govinda bhagavatpada','गोविन्द भगवत्पाद','sannyasa','संन्यास','shastra','शास्त्र','gita','गीता','brahma sutra','ब्रह्मसूत्र',
+  'bhakti','भक्ति','karma yoga','कर्मयोग','jnana','ज्ञान','jivanmukti','जीवन्मुक्ति','shravan','श्रवण','manan','मनन','nididhyasan','निदिध्यासन',
+  'dvaita','द्वैत','vishishtadvaita','विशिष्टाद्वैत','ramanuja','रामानुज','madhva','मध्व'
 ];
 const INSTITUTION_TERMS=['ekatma','ekatam','एकात्म','yatra','यात्रा','dham','धाम','nyas','न्यास','maharath','महारथ','rath yatra','रथ यात्रा','meeting','बैठक','decision','निर्णय','approved','approval','route','मार्ग','chairman','trustee','कार्यक्रम','programme','event','contact','team','official','institution','संस्था'];
-const PHILOSOPHY_TERMS=['advaita','अद्वैत','vedanta','vedant','वेदांत','वेदान्त','upanishad','उपनिषद','brahman','ब्रह्म','atman','आत्मा','maya','माया','moksha','मोक्ष','mahavakya','महावाक्य','adi shankar','adi shankara','आदि शंकर','shankaracharya','शंकराचार्य','gita','गीता','brahma sutra','ब्रह्मसूत्र'];
+const PHILOSOPHY_TERMS=['advaita','अद्वैत','vedanta','vedant','वेदांत','वेदान्त','upanishad','उपनिषद','brahman','ब्रह्म','atman','आत्मा','maya','माया','moksha','मोक्ष','mahavakya','महावाक्य','adi shankar','adi shankara','आदि शंकर','shankaracharya','शंकराचार्य','gita','गीता','brahma sutra','ब्रह्मसूत्र','bhakti','भक्ति','karma yoga','कर्मयोग','jivanmukti','जीवन्मुक्ति'];
 
 function norm(s=''){return String(s).normalize('NFKC').toLowerCase().replace(/[’']/g,'').replace(/[^\p{L}\p{M}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim()}
 function hasAny(n,list){return list.some(x=>n.includes(norm(x)))}
@@ -36,6 +39,35 @@ function philosophical(q){return hasAny(norm(q),PHILOSOPHY_TERMS)}
 function welcomePrefix(q,history){return firstTurn(history)&&!greet(q)?'हरिः ॐ 🙏\n\n':''}
 function cleanSource(s,i){return {ref:`S${i+1}`,title:s.title||s.file_name||'Source',file_name:s.file_name||'',page_number:s.page_number||s.page||null,section_title:s.section_title||null,content:s.content||s.excerpt||'',excerpt:s.excerpt||s.content||'',trust:s.trust||'verified',origin:s.origin||'knowledge',uri:s.uri||null,document_date:s.document_date||null}}
 function evidenceText(sources){return sources.map((s,i)=>`[S${i+1}] ${s.title||s.file_name||'Source'}${s.document_date?` | date ${s.document_date}`:''}${s.page_number?` | page ${s.page_number}`:''}${s.section_title?` | ${s.section_title}`:''}\n${String(s.content||s.excerpt||'').slice(0,7000)}`).join('\n\n')}
+
+function resolveCoreFact(question){
+  const n=norm(question),pick=id=>FACT_MAP.get(id)||null;
+  const adv=hasAny(n,['advaita','अद्वैत','vedanta','vedant','वेदांत','वेदान्त']);
+  if(hasAny(n,['aham brahmasmi','अहं ब्रह्मास्मि']))return pick('adv_010');
+  if(hasAny(n,['tat tvam asi','तत् त्वम् असि','तत्त्वमसि']))return pick('adv_011');
+  if(hasAny(n,['sarvam khalvidam','सर्वं खल्विदं ब्रह्म','सर्व खल्विदं ब्रह्म']))return pick('adv_012');
+  if(hasAny(n,['vasudhaiva kutumbakam','वसुधैव कुटुम्बकम्','वसुधैव कुटुम्बकम']))return pick('adv_013');
+  if(hasAny(n,['brahman','ब्रह्म'])&&hasAny(n,['atman','आत्मा','आत्मन्']))return pick('adv_004');
+  if(hasAny(n,['brahman','ब्रह्म']))return pick('adv_002');
+  if(hasAny(n,['atman','आत्मा','आत्मन्']))return pick('adv_003');
+  if(hasAny(n,['maya','माया']))return pick('adv_005');
+  if(hasAny(n,['moksha','मोक्ष']))return pick('adv_006');
+  if(hasAny(n,['jivanmukti','जीवन्मुक्ति','jivanmukta','जीवन्मुक्त']))return pick('adv_007');
+  if(hasAny(n,['shravan','श्रवण','manan','मनन','nididhyasan','निदिध्यासन']))return pick('adv_008');
+  if(adv&&hasAny(n,['bhakti','भक्ति','karma','कर्म']))return pick('adv_009');
+  if(adv&&hasAny(n,['diversity','uniformity','विविधता','एकरूपता']))return pick('adv_014');
+  if(adv&&hasAny(n,['relevant','today','modern','आज','आज के समय','21st']))return pick('adv_015');
+  if(adv&&hasAny(n,['what','meaning','मतलब','क्या है','samjha','समझा','समझाइए','basic','बेसिक']))return pick('adv_001');
+  if(hasAny(n,['adi shankar','adi shankara','आदि शंकर','shankaracharya','शंकराचार्य'])){
+    if(hasAny(n,['guru','गुरु']))return pick('shankara_004');
+    if(hasAny(n,['parents','माता','पिता','mother','father','aryamba','shivaguru']))return pick('shankara_003');
+    if(hasAny(n,['born','birth','जन्म']))return pick('shankara_002');
+    if(hasAny(n,['commentary','bhashya','भाष्य','wrote','लिख']))return pick('shankara_006');
+    if(hasAny(n,['four','चार','peeth','पीठ','matha','मठ']))return pick('shankara_007');
+    if(adv||hasAny(n,['who','kaun','कौन','importance','महत्व','basic idea','दर्शन']))return pick('shankara_001');
+  }
+  return null;
+}
 
 async function gemini(contents,{system='',jsonMode=true,maxOutputTokens=3200,temperature=.18}={}){
   const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('gemini_not_configured');
@@ -101,7 +133,7 @@ function extractCanonicalAnswer(text=''){
 }
 function cleanSentence(s=''){return String(s).replace(/\s+/g,' ').replace(/^(source|url|fact_id|status|confidence|question|question_variants)\s*:\s*/i,'').trim()}
 function naturalFallback(question,sources,history=[]){
-  const hi=hasDevanagari(question),prefix=welcomePrefix(question,history),lines=[];
+  const prefix=welcomePrefix(question,history),lines=[];
   for(const s of sources.slice(0,5)){
     const raw=String(s.content||s.excerpt||'');const canonical=extractCanonicalAnswer(raw);
     if(canonical){lines.push(canonical);continue}
@@ -124,7 +156,8 @@ export async function answerConversation({question,history=[],internalFetch}){
   if(isInjection(q))return{answer:'हरिः ॐ 🙏\n\nमैं अपने grounding और safety rules को bypass नहीं कर सकता। लेकिन एकात्म, न्यास, आदि शंकराचार्य या अद्वैत वेदान्त से जुड़ा कोई वास्तविक प्रश्न पूछिए—मैं पूरी मदद करूँगा।',sources:[],grounded:true,refused:true,inScope:true,composer:'policy'};
   if(!inScope(q,history))return{answer:'हरिः ॐ 🙏\n\nमैं **Ekatma Intelligence** हूँ। मेरी विशेषज्ञता एकात्म धाम, एकात्म यात्रा, आचार्य शंकर सांस्कृतिक एकता न्यास, आदि शंकराचार्य और अद्वैत वेदान्त में है। उसी क्षेत्र से जुड़ा प्रश्न पूछिए—मैं विस्तार से उत्तर दूँगा।',sources:[],grounded:true,refused:true,inScope:false,composer:'scope-redirect'};
 
-  const canonical=matchCanonical(q,{threshold:.64});
+  const coreFact=resolveCoreFact(q);
+  const canonical=coreFact?{fact:coreFact,score:1,matched:'core-concept-resolver'}:matchCanonical(q,{threshold:.64});
   if(canonical?.special){
     const sources=(canonical.special.sources||[]).map(cleanSource);
     try{const c=await compose(q,sources,history,{allowGeneralKnowledge:false});return{...c,answer:welcomePrefix(q,history)+c.answer,sources,grounded:true,canonical:true,status:canonical.special.status,confidence:c.confidence,composer:'gemini-canonical'}}catch{}
