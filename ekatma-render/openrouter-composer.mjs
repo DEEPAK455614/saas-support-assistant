@@ -10,6 +10,17 @@ function recentConversation(history=[]){return (history||[]).slice(-12).map(m=>`
 function evidence(sources=[]){return (sources||[]).slice(0,10).map((s,i)=>{const title=s.title||s.file_name||`Source ${i+1}`;const text=s.content||s.excerpt||'';const status=s.status?` | status=${s.status}`:'';const date=s.document_date?` | verified/date=${s.document_date}`:'';return `[S${i+1}] ${title}${status}${date}\n${clip(text,5000)}`}).join('\n\n')}
 function isGeneralPhilosophy(q){return /(advaita|अद्वैत|vedanta|vedant|वेदांत|वेदान्त|upanishad|उपनिषद|brahman|ब्रह्म|atman|आत्मा|maya|माया|moksha|मोक्ष|mahavakya|महावाक्य|shankaracharya|शंकराचार्य|gita|गीता|bhakti|भक्ति|karma yoga|कर्मयोग|jnana|ज्ञान)/i.test(String(q||''))&&!INSTITUTION_RE.test(String(q||''))}
 function cacheKey(question,history,sources){return JSON.stringify([String(question||'').trim(),(history||[]).slice(-6).map(m=>[m.role,clip(m.content,500)]),(sources||[]).slice(0,5).map(s=>[s.title||s.file_name,clip(s.content||s.excerpt,400)])])}
+function extractMessageText(j){
+  const msg=j?.choices?.[0]?.message||{};
+  if(typeof msg.content==='string'&&msg.content.trim())return msg.content.trim();
+  if(Array.isArray(msg.content)){
+    const t=msg.content.map(p=>typeof p==='string'?p:(p?.text||p?.content||'')).filter(Boolean).join('\n').trim();
+    if(t)return t;
+  }
+  if(typeof j?.output_text==='string'&&j.output_text.trim())return j.output_text.trim();
+  if(typeof j?.text==='string'&&j.text.trim())return j.text.trim();
+  return '';
+}
 
 const SYSTEM=`You are Ekatma Intelligence, a polished conversational assistant for Acharya Shankar Sanskritik Ekta Nyas, Ekatma Dham, Ekatma Yatra, Adi Shankaracharya and Advaita Vedanta.
 
@@ -23,26 +34,45 @@ GROUNDING RULES:
 5. For general Advaita/Vedanta/Shankaracharya philosophy, trained knowledge may supplement evidence when GENERAL KNOWLEDGE is marked ALLOWED.
 6. Resolve pronouns and short follow-up questions from RECENT CONVERSATION. Do not answer an unrelated entity just because another source shares words like location, date or role.
 7. Do not repeat Hari Om mechanically on every turn. A warm Hari Om is appropriate at the opening or when the user greets that way.
-8. ADVaita doctrinal precision: never describe jiva/Atman as a literal part, fraction, fragment or created piece of Brahman. In Advaita, the apparent distinction is due to avidya/upadhi; Atman is not other than Brahman. Prefer classical illustrations such as pot-space and space, wave and water, or rope-snake, and explain their limits when relevant.
+8. Advaita doctrinal precision: never describe jiva/Atman as a literal part, fraction, fragment or created piece of Brahman. In Advaita, the apparent distinction is due to avidya/upadhi; Atman is not other than Brahman. Prefer classical illustrations such as pot-space and space, wave and water, or rope-snake, and explain their limits when relevant.
 
-Prefer JSON only with this shape: {"answer":"...","confidence":"high|medium|low"}. If the selected free model cannot follow JSON formatting, a clean direct answer is acceptable.`;
+Return a clean direct answer. JSON is optional; if you use JSON, use only this shape: {"answer":"...","confidence":"high|medium|low"}.`;
 
-async function callOpenRouter({question,history,sources,baseAnswer}){
+function modelCandidates(){
+  const configured=String(process.env.OPENROUTER_MODEL||'').trim();
+  return [...new Set([
+    configured,
+    'nvidia/nemotron-3-super-120b-a12b:free',
+    'openrouter/free',
+    'openai/gpt-oss-120b:free'
+  ].filter(Boolean))];
+}
+
+async function callOne({model,question,history,sources,baseAnswer}){
   const key=process.env.OPENROUTER_API_KEY;if(!key)throw new Error('openrouter_not_configured');
-  const model=process.env.OPENROUTER_MODEL||'openrouter/free';
   const ev=evidence(sources),general=isGeneralPhilosophy(question);
   const input=`CURRENT USER QUESTION:\n${question}\n\nRECENT CONVERSATION:\n${recentConversation(history)||'(none)'}\n\nRETRIEVED EVIDENCE:\n${ev||'(none)'}\n\nCURRENT SAFE FALLBACK ANSWER (may be terse; improve it, do not blindly copy irrelevant parts):\n${clip(baseAnswer,6000)||'(none)'}\n\nGENERAL KNOWLEDGE: ${general?'ALLOWED only for general Advaita/Vedanta/Shankaracharya explanation.':'NOT ALLOWED for institutional facts beyond evidence.'}`;
-  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),25000);
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),30000);
   try{
-    const r=await fetch('https://openrouter.ai/api/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{'content-type':'application/json','authorization':`Bearer ${key}`,'http-referer':'https://ekatma-intelligence-os.onrender.com','x-title':'Ekatma Intelligence OS'},body:JSON.stringify({model,messages:[{role:'system',content:SYSTEM},{role:'user',content:input}],temperature:0.2,max_tokens:1400})});
+    const r=await fetch('https://openrouter.ai/api/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{'content-type':'application/json','authorization':`Bearer ${key}`,'http-referer':'https://ekatma-intelligence-os.onrender.com','x-title':'Ekatma Intelligence OS'},body:JSON.stringify({model,messages:[{role:'system',content:SYSTEM},{role:'user',content:input}],temperature:0.2,max_tokens:2400})});
     const raw=await r.text();
-    if(!r.ok){let detail='';try{const j=JSON.parse(raw);detail=j?.error?.message||j?.message||''}catch{};console.error('OPENROUTER_ERROR',r.status,clip(detail||raw,500));const e=new Error(`openrouter_${r.status}`);e.status=r.status;throw e}
-    const j=JSON.parse(raw),text=cleanText(j?.choices?.[0]?.message?.content||'');
-    if(!text)throw new Error('openrouter_empty');
+    if(!r.ok){let detail='';try{const j=JSON.parse(raw);detail=j?.error?.message||j?.message||''}catch{};console.error('OPENROUTER_ERROR',model,r.status,clip(detail||raw,500));const e=new Error(`openrouter_${r.status}`);e.status=r.status;throw e}
+    let j;try{j=JSON.parse(raw)}catch{throw new Error('openrouter_parse')}
+    const text=cleanText(extractMessageText(j));
+    if(!text){console.error('OPENROUTER_EMPTY',model,clip(raw,500));throw new Error('openrouter_empty')}
     const obj=safeJson(text);
     if(obj?.answer)return {answer:String(obj.answer).trim(),confidence:obj.confidence||'medium',model:j.model||model,composer:'openrouter'};
     return {answer:text,confidence:'medium',model:j.model||model,composer:'openrouter'};
   }finally{clearTimeout(timer)}
+}
+
+async function callOpenRouter(args){
+  let lastError=null;
+  for(const model of modelCandidates()){
+    try{return await callOne({...args,model})}
+    catch(e){lastError=e;if(e?.message==='openrouter_not_configured')break}
+  }
+  throw lastError||new Error('openrouter_failed');
 }
 
 export async function polishWithOpenRouter({question,history=[],result={}}){
