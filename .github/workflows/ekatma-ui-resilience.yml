@@ -26,6 +26,7 @@ jobs:
           ! grep -q 'cdn.jsdelivr.net/npm/react' <<<"$HTML"
           HEALTH=$(curl -fsS "$URL/health")
           jq -e '.ok==true and .qa930.questions==930 and .canonicalKnowledge.facts==117' <<<"$HEALTH" >/dev/null
+
           BODY=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"अद्वैत वेदान्त में जीव और ब्रह्म के संबंध को सरल उदाहरण से समझाइए।","history":[]}')
           echo "$BODY" | jq .
           jq -e '.refused != true and (.answer|length>80)' <<<"$BODY" >/dev/null
@@ -34,4 +35,13 @@ jobs:
             openrouter|openrouter-cache|openrouter+vedantany-10m) ;;
             *) echo "OpenRouter was not used: $MODE"; exit 1;;
           esac
-          echo "Advaitic UI and OpenRouter/VedantaNY composer are live."
+
+          VEDANTA_BODY=''
+          for i in $(seq 1 30); do
+            VEDANTA_BODY=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"What constitutes Sadhana Chatushtaya?","history":[]}' || true)
+            if jq -e '.meta.knowledgeLayer=="VedantaNY-10M" and (.sources|map(.origin)|index("vedantany_10m")!=null)' <<<"$VEDANTA_BODY" >/dev/null 2>&1; then break; fi
+            sleep 4
+          done
+          echo "$VEDANTA_BODY" | jq .
+          jq -e '.refused != true and (.answer|length>80) and .meta.knowledgeLayer=="VedantaNY-10M" and (.sources|map(.origin)|index("vedantany_10m")!=null)' <<<"$VEDANTA_BODY" >/dev/null
+          echo "Advaitic UI, OpenRouter and VedantaNY-10M knowledge layer are live."
