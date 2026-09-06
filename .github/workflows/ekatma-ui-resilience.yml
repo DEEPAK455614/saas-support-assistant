@@ -31,7 +31,7 @@ jobs:
           jq -e '.refused != true and (.answer|length>80)' <<<"$BODY" >/dev/null
           MODE=$(jq -r '.composer // "none"' <<<"$BODY")
           case "$MODE" in
-            openrouter|openrouter-cache) ;;
+            openrouter|openrouter-cache|openrouter+vedantany-10m) ;;
             *) echo "OpenRouter was not used: $MODE"; exit 1;;
           esac
-          echo "Advaitic UI and OpenRouter composer are live."
+          echo "Advaitic UI and OpenRouter/VedantaNY composer are live."
