@@ -1,0 +1,25 @@
+name: Ekatma UI resilience
+on:
+  push:
+    branches: [ekatma-intelligence-os]
+  workflow_dispatch:
+
+jobs:
+  verify-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live UI and chat endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://ekatma-intelligence-os.onrender.com"
+          HTML=$(curl -fsS "$URL/")
+          grep -q 'Ask. Understand. Go deeper.' <<<"$HTML"
+          grep -q 'Ekatma Intelligence' <<<"$HTML"
+          grep -q 'Knowledge Portal' <<<"$HTML"
+          ! grep -q 'cdn.jsdelivr.net/npm/react' <<<"$HTML"
+          HEALTH=$(curl -fsS "$URL/health")
+          jq -e '.ok==true and .qa930.questions==930 and .canonicalKnowledge.facts==117' <<<"$HEALTH" >/dev/null
+          BODY=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"What is Ekatma Dham?","history":[]}')
+          jq -e '.refused != true and (.answer|length>30)' <<<"$BODY" >/dev/null
+          echo "UI and chat endpoint are live."
