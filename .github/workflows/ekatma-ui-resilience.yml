@@ -8,7 +8,23 @@ jobs:
   verify-ui:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live Advaitic UI and OpenRouter chat
+      - uses: actions/checkout@v4
+      - name: Verify VedantaNY adapter against pinned upstream corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ekatma-render
+          node --input-type=module <<'NODE'
+          import { vedantaNySearch, vedantaNyStats } from './vedantany-source.mjs';
+          const rows=await vedantaNySearch('What constitutes Sadhana Chatushtaya?',{limit:4,minScore:.13});
+          const stats=vedantaNyStats();
+          console.log(JSON.stringify({stats,top:rows[0]||null},null,2));
+          if(!rows.length) throw new Error('No VedantaNY result');
+          if(rows[0].origin!=='vedantany_10m') throw new Error('Wrong source origin');
+          if(!/Sadhana Chatushtaya/i.test(rows[0].title||rows[0].content||'')) throw new Error('Expected Sadhana source not retrieved');
+          if(stats.entries<20) throw new Error(`Too few upstream entries loaded: ${stats.entries}`);
+          NODE
+      - name: Verify live Advaitic UI and VedantaNY chat
         shell: bash
         run: |
           set -euo pipefail
@@ -37,7 +53,7 @@ jobs:
           esac
 
           VEDANTA_BODY=''
-          for i in $(seq 1 30); do
+          for i in $(seq 1 45); do
             VEDANTA_BODY=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"What constitutes Sadhana Chatushtaya?","history":[]}' || true)
             if jq -e '.meta.knowledgeLayer=="VedantaNY-10M" and (.sources|map(.origin)|index("vedantany_10m")!=null)' <<<"$VEDANTA_BODY" >/dev/null 2>&1; then break; fi
             sleep 4
