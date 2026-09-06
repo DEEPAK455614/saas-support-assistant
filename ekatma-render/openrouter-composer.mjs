@@ -1,3 +1,5 @@
+import { isVedantaKnowledgeQuery } from './vedantany-source.mjs';
+
 const DOMAIN_RE=/(ekatma|ekatam|एकात्म|yatra|यात्रा|dham|धाम|nyas|न्यास|shankar|शंकर|advaita|अद्वैत|vedanta|vedant|वेदांत|वेदान्त|upanishad|उपनिषद|brahman|ब्रह्म|atman|आत्मा|maya|माया|moksha|मोक्ष|mahavakya|महावाक्य|omkareshwar|ओंकारेश्वर|oneness|peeth|पीठ|matha|mutt|मठ|gita|गीता|bhakti|भक्ति|karma yoga|कर्मयोग|jnana|ज्ञान)/i;
 const INSTITUTION_RE=/(ekatma|ekatam|एकात्म|yatra|यात्रा|dham|धाम|nyas|न्यास|maharath|महारथ|route|मार्ग|meeting|बैठक|decision|निर्णय|approval|approved|chairman|trustee|programme|program|event|contact|official|institution|संस्था|omkareshwar|ओंकारेश्वर|statue of oneness)/i;
 const CACHE=new Map();
@@ -8,7 +10,7 @@ function safeJson(text){try{return JSON.parse(text)}catch{const m=String(text||'
 function cleanText(text){return String(text||'').replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim()}
 function recentConversation(history=[]){return (history||[]).slice(-12).map(m=>`${m.role==='assistant'?'Assistant':'User'}: ${clip(m.content,1600)}`).join('\n')}
 function evidence(sources=[]){return (sources||[]).slice(0,10).map((s,i)=>{const title=s.title||s.file_name||`Source ${i+1}`;const text=s.content||s.excerpt||'';const status=s.status?` | status=${s.status}`:'';const date=s.document_date?` | verified/date=${s.document_date}`:'';return `[S${i+1}] ${title}${status}${date}\n${clip(text,5000)}`}).join('\n\n')}
-function isGeneralPhilosophy(q){return /(advaita|अद्वैत|vedanta|vedant|वेदांत|वेदान्त|upanishad|उपनिषद|brahman|ब्रह्म|atman|आत्मा|maya|माया|moksha|मोक्ष|mahavakya|महावाक्य|shankaracharya|शंकराचार्य|gita|गीता|bhakti|भक्ति|karma yoga|कर्मयोग|jnana|ज्ञान)/i.test(String(q||''))&&!INSTITUTION_RE.test(String(q||''))}
+function isGeneralPhilosophy(q){return (/(advaita|अद्वैत|vedanta|vedant|वेदांत|वेदान्त|upanishad|उपनिषद|brahman|ब्रह्म|atman|आत्मा|maya|माया|moksha|मोक्ष|mahavakya|महावाक्य|shankaracharya|शंकराचार्य|gita|गीता|bhakti|भक्ति|karma yoga|कर्मयोग|jnana|ज्ञान)/i.test(String(q||''))||isVedantaKnowledgeQuery(q))&&!INSTITUTION_RE.test(String(q||''))}
 function cacheKey(question,history,sources){return JSON.stringify([String(question||'').trim(),(history||[]).slice(-6).map(m=>[m.role,clip(m.content,500)]),(sources||[]).slice(0,5).map(s=>[s.title||s.file_name,clip(s.content||s.excerpt,400)])])}
 function extractMessageText(j){
   const msg=j?.choices?.[0]?.message||{};
@@ -31,7 +33,7 @@ GROUNDING RULES:
 2. Preserve status words and uncertainty exactly: planned, provisional, versioned/not-final, live-data-required, tradition-sensitive, conflicting sources, etc. Never convert a proposal into an approved/final fact.
 3. If evidence conflicts, state the conflict clearly instead of selecting one value.
 4. Cite factual evidence with [S1], [S2], etc. Use only citation numbers present in the evidence.
-5. For general Advaita/Vedanta/Shankaracharya philosophy, trained knowledge may supplement evidence when GENERAL KNOWLEDGE is marked ALLOWED.
+5. For general Advaita/Vedanta/Shankaracharya philosophy, trained knowledge may supplement evidence when GENERAL KNOWLEDGE is marked ALLOWED. When VedantaNY evidence is supplied, treat it as the primary research source and use trained knowledge only to clarify, not override it.
 6. Resolve pronouns and short follow-up questions from RECENT CONVERSATION. Do not answer an unrelated entity just because another source shares words like location, date or role.
 7. Do not repeat Hari Om mechanically on every turn. A warm Hari Om is appropriate at the opening or when the user greets that way.
 8. Advaita doctrinal precision: never describe jiva/Atman as a literal part, fraction, fragment or created piece of Brahman. In Advaita, the apparent distinction is due to avidya/upadhi; Atman is not other than Brahman. Prefer classical illustrations such as pot-space and space, wave and water, or rope-snake, and explain their limits when relevant.
@@ -76,7 +78,8 @@ async function callOpenRouter(args){
 }
 
 export async function polishWithOpenRouter({question,history=[],result={}}){
-  if(!DOMAIN_RE.test(`${question} ${(history||[]).slice(-4).map(x=>x.content||'').join(' ')}`))return null;
+  const context=`${question} ${(history||[]).slice(-4).map(x=>x.content||'').join(' ')}`;
+  if(!DOMAIN_RE.test(context)&&!isVedantaKnowledgeQuery(question))return null;
   if(result?.refused===true||['social','policy','scope-redirect'].includes(result?.composer))return null;
   const key=cacheKey(question,history,result.sources||[]),cached=CACHE.get(key);
   if(cached&&Date.now()-cached.at<CACHE_TTL)return {...cached.value,composer:'openrouter-cache'};
