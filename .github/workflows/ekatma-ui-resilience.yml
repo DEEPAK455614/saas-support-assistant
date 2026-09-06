@@ -8,18 +8,30 @@ jobs:
   verify-ui:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live UI and chat endpoint
+      - name: Verify live Advaitic UI and OpenRouter chat
         shell: bash
         run: |
           set -euo pipefail
           URL="https://ekatma-intelligence-os.onrender.com"
+          for i in $(seq 1 30); do
+            HTML=$(curl -fsS "$URL/" || true)
+            if grep -q 'सर्वं खल्विदं ब्रह्म' <<<"$HTML"; then break; fi
+            sleep 4
+          done
           HTML=$(curl -fsS "$URL/")
-          grep -q 'Ask. Understand. Go deeper.' <<<"$HTML"
+          grep -q 'सर्वं खल्विदं ब्रह्म' <<<"$HTML"
+          grep -q 'एकमेवाद्वितीयम्' <<<"$HTML"
           grep -q 'Ekatma Intelligence' <<<"$HTML"
           grep -q 'Knowledge Portal' <<<"$HTML"
           ! grep -q 'cdn.jsdelivr.net/npm/react' <<<"$HTML"
           HEALTH=$(curl -fsS "$URL/health")
           jq -e '.ok==true and .qa930.questions==930 and .canonicalKnowledge.facts==117' <<<"$HEALTH" >/dev/null
-          BODY=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"What is Ekatma Dham?","history":[]}')
-          jq -e '.refused != true and (.answer|length>30)' <<<"$BODY" >/dev/null
-          echo "UI and chat endpoint are live."
+          BODY=$(curl -fsS "$URL/api/chat" -H 'content-type: application/json' --data '{"question":"अद्वैत वेदान्त में जीव और ब्रह्म के संबंध को सरल उदाहरण से समझाइए।","history":[]}')
+          echo "$BODY" | jq .
+          jq -e '.refused != true and (.answer|length>80)' <<<"$BODY" >/dev/null
+          MODE=$(jq -r '.composer // "none"' <<<"$BODY")
+          case "$MODE" in
+            openrouter|openrouter-cache) ;;
+            *) echo "OpenRouter was not used: $MODE"; exit 1;;
+          esac
+          echo "Advaitic UI and OpenRouter composer are live."
