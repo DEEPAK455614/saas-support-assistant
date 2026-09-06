@@ -40,7 +40,11 @@ async function callModel(model,{question,history,sources,baseAnswer}){
 }
 
 async function interactionCall(args){
-  const models=[process.env.GEMINI_MODEL||'gemini-3.8-flash','gemini-2.5-flash-lite','gemini-2.5-flash'].filter((x,i,a)=>x&&a.indexOf(x)===i);
+  const models=[
+    process.env.GEMINI_MODEL||'gemini-3.8-flash',
+    process.env.GEMINI_FALLBACK_MODEL||'gemini-3.5-flash-lite',
+    'gemini-3.6-flash'
+  ].filter((x,i,a)=>x&&a.indexOf(x)===i);
   let last;
   for(const model of models){try{return await callModel(model,args)}catch(e){last=e;if(![429,404,400].includes(e?.status))break}}
   throw last||new Error('gemini_interactions_failure');
