@@ -5,6 +5,7 @@ const CACHE_TTL=10*60*1000;
 
 function clip(s,n=6000){const x=String(s||'').replace(/\u0000/g,'').trim();return x.length>n?x.slice(0,n)+'…':x}
 function safeJson(text){try{return JSON.parse(text)}catch{const m=String(text||'').match(/\{[\s\S]*\}/);if(m)try{return JSON.parse(m[0])}catch{}return null}}
+function cleanText(text){return String(text||'').replace(/^```(?:json)?\s*/i,'').replace(/```\s*$/,'').trim()}
 function recentConversation(history=[]){return (history||[]).slice(-12).map(m=>`${m.role==='assistant'?'Assistant':'User'}: ${clip(m.content,1600)}`).join('\n')}
 function evidence(sources=[]){return (sources||[]).slice(0,10).map((s,i)=>{const title=s.title||s.file_name||`Source ${i+1}`;const text=s.content||s.excerpt||'';const status=s.status?` | status=${s.status}`:'';const date=s.document_date?` | verified/date=${s.document_date}`:'';return `[S${i+1}] ${title}${status}${date}\n${clip(text,5000)}`}).join('\n\n')}
 function isGeneralPhilosophy(q){return /(advaita|अद्वैत|vedanta|vedant|वेदांत|वेदान्त|upanishad|उपनिषद|brahman|ब्रह्म|atman|आत्मा|maya|माया|moksha|मोक्ष|mahavakya|महावाक्य|shankaracharya|शंकराचार्य|gita|गीता|bhakti|भक्ति|karma yoga|कर्मयोग|jnana|ज्ञान)/i.test(String(q||''))&&!INSTITUTION_RE.test(String(q||''))}
@@ -23,7 +24,7 @@ GROUNDING RULES:
 6. Resolve pronouns and short follow-up questions from RECENT CONVERSATION. Do not answer an unrelated entity just because another source shares words like location, date or role.
 7. Do not repeat Hari Om mechanically on every turn. A warm Hari Om is appropriate at the opening or when the user greets that way.
 
-Return JSON only with this shape: {"answer":"...","confidence":"high|medium|low"}.`;
+Prefer JSON only with this shape: {"answer":"...","confidence":"high|medium|low"}. If the selected free model cannot follow JSON formatting, a clean direct answer is acceptable.`;
 
 async function callOpenRouter({question,history,sources,baseAnswer}){
   const key=process.env.OPENROUTER_API_KEY;if(!key)throw new Error('openrouter_not_configured');
@@ -35,10 +36,11 @@ async function callOpenRouter({question,history,sources,baseAnswer}){
     const r=await fetch('https://openrouter.ai/api/v1/chat/completions',{method:'POST',signal:controller.signal,headers:{'content-type':'application/json','authorization':`Bearer ${key}`,'http-referer':'https://ekatma-intelligence-os.onrender.com','x-title':'Ekatma Intelligence OS'},body:JSON.stringify({model,messages:[{role:'system',content:SYSTEM},{role:'user',content:input}],temperature:0.2,max_tokens:1400})});
     const raw=await r.text();
     if(!r.ok){let detail='';try{const j=JSON.parse(raw);detail=j?.error?.message||j?.message||''}catch{};console.error('OPENROUTER_ERROR',r.status,clip(detail||raw,500));const e=new Error(`openrouter_${r.status}`);e.status=r.status;throw e}
-    const j=JSON.parse(raw),text=String(j?.choices?.[0]?.message?.content||'').trim();
+    const j=JSON.parse(raw),text=cleanText(j?.choices?.[0]?.message?.content||'');
     if(!text)throw new Error('openrouter_empty');
-    const obj=safeJson(text);if(!obj?.answer)throw new Error('openrouter_parse');
-    return {answer:String(obj.answer).trim(),confidence:obj.confidence||'medium',model:j.model||model,composer:'openrouter'};
+    const obj=safeJson(text);
+    if(obj?.answer)return {answer:String(obj.answer).trim(),confidence:obj.confidence||'medium',model:j.model||model,composer:'openrouter'};
+    return {answer:text,confidence:'medium',model:j.model||model,composer:'openrouter'};
   }finally{clearTimeout(timer)}
 }
 
